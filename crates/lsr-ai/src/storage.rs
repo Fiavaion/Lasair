@@ -7,7 +7,7 @@
 //! | `models`   | model files and licence acceptances   | `~/Library/Caches/Lasair/{models,accepted.toml}`; `%LOCALAPPDATA%\Lasair\...`; `~/.cache/lasair/...` |
 //! | `settings` | host tokens, cloud keys               | `hosts.toml`, `secrets.toml` beside `accepted.toml`         |
 //! | `settings` | interface, Learn progress, trusted Python operators | `ui.toml`, `learn.toml`, `allowed-python-ops.txt` in `~/Library/Application Support/Lasair`; `%APPDATA%\Lasair`; `~/.config/lasair` |
-//! | `cache`    | caches and logs                       | none today: logs go to stderr and caches stay in memory or in a project's `.cache/` |
+//! | `cache`    | the assistant's retrieval index (`lasair agent --assist full`) | `assistant-index/` beside `accepted.toml`; logs go to stderr and other caches stay in memory or in a project's `.cache/` |
 //!
 //! Only these paths are removed, never the folders around them unless they
 //! are left empty. Models that other tools manage (Ollama's `~/.ollama`,
@@ -163,6 +163,11 @@ impl Storage {
             "licence acceptances".to_owned(),
             store.accepted_path().to_path_buf(),
         ));
+        out.push((
+            Kind::Cache,
+            "assistant retrieval index".to_owned(),
+            assistant_index_dir_in(&self.settings),
+        ));
         out.push((Kind::Settings, "host tokens".to_owned(), store.hosts_path()));
         out.push((
             Kind::Settings,
@@ -241,6 +246,16 @@ impl Storage {
             let _ = std::fs::remove_dir(dir);
         }
     }
+}
+
+/// Where the assistant keeps its operator and example embeddings
+/// (`lasair agent --assist full`), in the `cache` kind.
+pub fn assistant_index_dir() -> PathBuf {
+    assistant_index_dir_in(&models::settings_dir())
+}
+
+fn assistant_index_dir_in(settings: &Path) -> PathBuf {
+    settings.join("assistant-index")
 }
 
 /// [`Storage::list`] on a worker thread, for a UI to poll.
@@ -665,6 +680,21 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("never touched"), "{text}");
+    }
+
+    #[test]
+    fn the_assistant_index_is_cache_and_goes_with_it() {
+        let root = scratch("assist-index");
+        let s = layout(&root);
+        write(&assistant_index_dir_in(&s.settings).join("index.json"), 5);
+        assert!(
+            kinds(&s.list()).contains(&(Kind::Cache, "assistant retrieval index", 5)),
+            "{:?}",
+            kinds(&s.list())
+        );
+        s.remove(&[Kind::Cache]);
+        assert!(!assistant_index_dir_in(&s.settings).exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

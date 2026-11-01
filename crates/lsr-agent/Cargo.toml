@@ -15,6 +15,7 @@ lsr-ai.workspace = true
 ureq.workspace = true
 lsr-kernel.workspace = true
 lsr-stage.workspace = true
+lsr-format.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -22,7 +23,6 @@ log.workspace = true
 toml_edit = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-lsr-format.workspace = true
 lsr-ops-dat.workspace = true
 lsr-ops-img.workspace = true
 lsr-ops-sig.workspace = true

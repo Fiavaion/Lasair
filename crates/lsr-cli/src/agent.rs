@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
+use lsr_agent::assist::{self, Assist, Assistance, DEFAULT_EMBED_MODEL, OllamaEmbedder, Retriever};
 use lsr_agent::assistant::{self, Anthropic, Llm, Ollama};
 use lsr_agent::lock::Scope;
 use lsr_agent::{Agent, ShowLock, Workspace};
@@ -62,6 +63,42 @@ pub struct ModelArgs {
     /// Turn Sovereign mode off for this run (cloud providers).
     #[arg(long)]
     pub allow_internet: bool,
+    /// How much help the model gets: `bare` (the plain tool loop: no
+    /// operator list, no retrieval, no repair prompts), `standard` (what
+    /// the app does) or `full` (standard plus semantic retrieval of
+    /// operator docs and worked examples, plan validation, more repair
+    /// rounds and a self-review). See docs/agent.md.
+    #[arg(long, default_value = "standard")]
+    pub assist: Assist,
+    /// `--assist full`: the Ollama embedding model for retrieval.
+    #[arg(long, default_value = DEFAULT_EMBED_MODEL)]
+    pub embed_model: String,
+    /// `--assist full`: the folder of example projects retrieved as worked
+    /// examples (never the eval's own seeds and solutions).
+    #[arg(long, default_value = "examples")]
+    pub examples: PathBuf,
+}
+
+/// The help for `m.assist`. At `full` this indexes the operators and
+/// examples (cached in the app's cache folder); if the embedding model
+/// is unavailable it says so once and retrieval stays lexical.
+fn assistance(m: &ModelArgs, registry: &lsr_core::Registry) -> Assistance {
+    let assistance = Assistance::new(m.assist);
+    if m.assist != Assist::Full {
+        return assistance;
+    }
+    let examples = assist::load_examples(&m.examples, registry);
+    let embedder = Box::new(OllamaEmbedder::new(&m.embed_model));
+    let dir = lsr_ai::storage::assistant_index_dir();
+    match Retriever::build(registry, examples, embedder, Some(&dir)) {
+        Ok(r) => assistance.with_retriever(r),
+        Err(e) => {
+            eprintln!(
+                "assist full: cannot build the retrieval index ({e}); using lexical retrieval"
+            );
+            assistance
+        }
+    }
 }
 
 fn llm(m: &ModelArgs) -> Result<Box<dyn Llm>> {
@@ -95,8 +132,15 @@ pub fn run(cmd: AgentCommand) -> Result<()> {
             let mut ws = ServeWorkspace::open(&project, true, allow_python_ops)?;
             let lock = ShowLock::load(&project).map_err(|e| anyhow!(e))?;
             let mut agent = Agent::new(scopes(), lock);
-            let run =
-                assistant::build(llm.as_mut(), &mut agent, &mut ws, &request, model.max_steps);
+            let mut help = assistance(&model, ws.registry());
+            let run = assistant::build_with(
+                llm.as_mut(),
+                &mut agent,
+                &mut ws,
+                &request,
+                model.max_steps,
+                &mut help,
+            );
             println!(
                 "{} steps, {} tool calls ({} refused), {} nodes, errors: {:?}",
                 run.steps,
@@ -138,6 +182,7 @@ fn eval(
     let mut llm = llm(m)?;
     let tmp = std::env::temp_dir().join(format!("lsr-eval-{}", std::process::id()));
     let registry = crate::project::library().0;
+    let mut help = assistance(m, &registry);
     let mut rows = String::new();
     let (mut valid, mut total) = (0, 0);
     let (mut points, mut max_points) = (0, 0);
@@ -157,7 +202,14 @@ fn eval(
         let t = Instant::now();
         let mut ws = ServeWorkspace::open(&dir, false, allow_python)?;
         let mut agent = Agent::new(scopes(), ShowLock::default());
-        let run = assistant::build(llm.as_mut(), &mut agent, &mut ws, &p.text, m.max_steps);
+        let run = assistant::build_with(
+            llm.as_mut(),
+            &mut agent,
+            &mut ws,
+            &p.text,
+            m.max_steps,
+            &mut help,
+        );
         // Judge the network the model left, cooked afresh.
         let errors: Vec<String> = ws.cook_errors().into_iter().map(|e| e.1).collect();
         let net = ws.network();
@@ -200,8 +252,9 @@ fn eval(
     let pct = 100.0 * valid as f64 / total.max(1) as f64;
     let mean_score = score_sum / total.max(1) as f64;
     let report = format!(
-        "# Network-generation eval\n\n**Model:** `{}` · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Score:** {points}/{max_points} points (**{mean_score:.0}%** mean per prompt) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = every check passes: at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it). The hard tier adds wiring paths, parameter values, expressions and bindings, node counts, kept nodes and seed projects (see `agent_check.rs`). Every check is one point; Score = points earned / points possible.\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why | Score |\n|---|---|---|---|---|---|---|---|\n{rows}",
+        "# Network-generation eval\n\n**Model:** `{}` · **Assist:** {} · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Score:** {points}/{max_points} points (**{mean_score:.0}%** mean per prompt) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = every check passes: at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it). The hard tier adds wiring paths, parameter values, expressions and bindings, node counts, kept nodes and seed projects (see `agent_check.rs`). Every check is one point; Score = points earned / points possible.\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why | Score |\n|---|---|---|---|---|---|---|---|\n{rows}",
         llm.name(),
+        m.assist,
         path.display(),
         start.elapsed().as_secs_f64(),
         m.max_steps

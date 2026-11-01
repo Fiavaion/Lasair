@@ -131,3 +131,30 @@ lasair agent ask show.lasair "a kaleidoscope of moving noise"
 lasair agent eval --out docs/milestones/m5/eval.md      # M5 AC1
 lasair agent eval --provider anthropic --model claude-sonnet-5-5 --allow-internet
 ```
+
+### Assist levels
+
+`--assist bare|standard|full` (on `ask` and `eval`) sets how much help the model gets, so a local
+model can be compared with and without the harness (PRD A72). The eval report header says which
+(`**Assist:** full`).
+
+| Level | What the model gets |
+|---|---|
+| `bare` | The plain tool loop only. Short rules (what a patch is, use the tools, accept and fix errors); no operator list, no retrieved docs, no planned mode, no nudge or repair prompts. It finds operators with `list_ops` and `get_schema`. Same tools and `--max-steps`. |
+| `standard` (default) | What the app does: the operator list, lexical retrieval of operator docs, planned mode (a schema-constrained JSON plan, restaged each round, up to 4 rounds repaired from staging and cook errors) for models that support it, the tool loop otherwise. On a project that already has nodes the planned prompt shows the whole network as JSON and asks to keep node names; on an empty project the prompts are the same as before levels existed. |
+| `full` | Standard plus: **semantic retrieval** (one chunk per operator, the corpus of `docs/operators`, embedded with Ollama `/api/embed`; the 8 nearest are merged with the lexical hits and written as full schemas); **worked examples** (the shipped `examples/*.lasair` that fit a prompt, the 2 nearest as compact network JSON); **plan validation** before staging (unknown types, unknown parameters, values outside the schema, wires to nothing or to a missing socket, wire type mismatches, required inputs with no wire), answered with a message naming the node and the valid options; **up to 6 repair rounds**; and one **self-review** after a clean accept: the model gets the request and a plain description of the network and says what is missing or wrong, and a plan round follows if it names something. The review sees neither the eval nor its checks. A model without structured output gets the retrieval and examples in the tool loop. |
+
+`full` needs the embedding model (`ollama pull qwen3-embedding:0.6b`; change it with
+`--embed-model`). The index (vectors, with a hash of the corpus and the model name) is cached in
+`assistant-index/` in the app's Cache storage kind (`lasair storage list`; removed by
+`lasair storage remove cache` and by uninstalling), so only the first run, or a changed corpus,
+embeds the operators. If Ollama or the model is missing, it says so once on stderr and retrieval
+stays lexical. The embedding requests go through the egress gate (localhost is allowed in
+Sovereign mode). `--examples <dir>` (default `examples`) is where worked examples come from;
+nothing under `docs/milestones/m5/hard/` (eval seeds and solutions) is ever indexed.
+
+```sh
+lasair agent eval --prompts docs/milestones/m5/eval-prompts-hard.toml --assist bare     --model qwen2.5-coder:7b --out bare.md
+lasair agent eval --prompts docs/milestones/m5/eval-prompts-hard.toml --assist standard --model qwen2.5-coder:7b --out standard.md
+lasair agent eval --prompts docs/milestones/m5/eval-prompts-hard.toml --assist full     --model qwen2.5-coder:7b --out full.md
+```

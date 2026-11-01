@@ -356,7 +356,7 @@ What it removes, by platform:
 | `packages` | `~/Library/Application Support/Lasair/ai-host` | `%LOCALAPPDATA%\Lasair\ai-host` | `~/.local/share/lasair/ai-host` |
 | `models` | `~/Library/Caches/Lasair/models`, `accepted.toml` | `%LOCALAPPDATA%\Lasair\models`, `accepted.toml` | `~/.cache/lasair/models`, `accepted.toml` |
 | `settings` | `hosts.toml`, `secrets.toml` beside `accepted.toml`; `ui.toml`, `learn.toml`, `allowed-python-ops.txt` in `~/Library/Application Support/Lasair` | the same beside `accepted.toml`; the rest in `%APPDATA%\Lasair` | the same beside `accepted.toml`; the rest in `~/.config/lasair` |
-| `cache` | none today (logs go to the terminal; a project's caches stay in its `.cache/`) | | |
+| `cache` | `assistant-index/` beside `accepted.toml` (the assistant's retrieval index, only after `lasair agent --assist full`); logs go to the terminal; a project's caches stay in its `.cache/` | the same | the same |
 
 The folders around them are removed only when nothing else is left in them.
 

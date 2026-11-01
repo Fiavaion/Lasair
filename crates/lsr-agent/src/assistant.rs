@@ -16,6 +16,10 @@ use serde_json::{Value, json};
 use lsr_ai::models::DownloadOptions;
 use lsr_core::registry::ParamKind;
 
+use crate::assist::{
+    Assist, Assistance, BARE_RULES, FULL_ROUNDS, Hits, REVIEW_ROUNDS, REVIEW_RULES,
+    describe_network, examples_block, network_json, validate_plan,
+};
 use crate::tools::{Agent, Output, output_text};
 use crate::workspace::Workspace;
 
@@ -56,7 +60,11 @@ impl Ollama {
     }
 }
 
-fn post_json(url: &str, headers: &[(&str, &str)], body: &Value) -> Result<Value, String> {
+pub(crate) fn post_json(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &Value,
+) -> Result<Value, String> {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
     let hostport = rest.split('/').next().unwrap_or_default();
     let (host, port) = match hostport.rsplit_once(':') {
@@ -312,6 +320,14 @@ const CORE_OPS: &[&str] = &[
 /// label and summary), plus [`CORE_OPS`], with their parameters and
 /// sockets written compactly, so a small model needs no schema lookups.
 pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
+    ops_block(&lexical_ops(ws, request), true)
+}
+
+/// The operators [`relevant_ops`] describes, best match first.
+pub(crate) fn lexical_ops<'a>(
+    ws: &'a dyn Workspace,
+    request: &str,
+) -> Vec<&'a lsr_core::registry::OperatorSchema> {
     let asked = words(request);
     let ops: Vec<&lsr_core::registry::OperatorSchema> = ws
         .registry()
@@ -363,9 +379,7 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
         .collect();
     scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.type_id.cmp(&b.1.type_id)));
     let best = scored.first().map_or(0.0, |s| s.0);
-    let mut out = String::from(
-        "\nOperators for this request (type: inputs -> outputs, `?` optional; parameters as name kind=default):\n",
-    );
+    let mut picked = Vec::new();
     let mut shown = 0;
     for (score, op) in scored {
         // The clear matches (a fifth of the best score or more), up to 16,
@@ -375,6 +389,18 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
             continue;
         }
         shown += usize::from(!core);
+        picked.push(op);
+    }
+    picked
+}
+
+/// `ops` written compactly (`cap`: long parameter lists are cut, as the
+/// standard prompt has always done; without it every parameter is listed).
+pub(crate) fn ops_block(ops: &[&lsr_core::registry::OperatorSchema], cap: bool) -> String {
+    let mut out = String::from(
+        "\nOperators for this request (type: inputs -> outputs, `?` optional; parameters as name kind=default):\n",
+    );
+    for op in ops {
         let sockets = |s: &[lsr_core::registry::SocketSchema]| {
             s.iter()
                 .map(|s| {
@@ -427,7 +453,7 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
                 format!("{name} {kind}={}", p.default)
             })
             .collect();
-        if params.len() > 14 {
+        if cap && params.len() > 14 {
             params.truncate(14);
             params.push("… (get_schema lists the rest)".into());
         }
@@ -508,7 +534,7 @@ Rules:\n\
 
 /// A plan's `params` lists (`[{name, value}]`) as the objects
 /// `build_network` takes.
-fn plan_to_network(plan: &Value) -> Value {
+pub(crate) fn plan_to_network(plan: &Value) -> Value {
     let mut net = plan.clone();
     // `noise1.out` → from noise1, output out; `blur1` alone → input `in`.
     for w in net["wires"].as_array_mut().into_iter().flatten() {
@@ -547,35 +573,114 @@ fn plan_to_network(plan: &Value) -> Value {
 /// Plan-then-build for a model with structured output: the model writes the
 /// whole network as JSON, it is staged afresh (so failed rounds never pile
 /// up nodes), and the errors go back for a corrected plan.
-fn build_planned(
-    llm: &mut dyn Llm,
-    agent: &mut Agent,
-    ws: &mut dyn Workspace,
-    request: &str,
-    rounds: u32,
-    trace: bool,
-) -> Option<Run> {
-    let schema = plan_schema(ws);
+/// The operators for a request: the lexical matches, and at `full` the
+/// semantic hits first, as full schemas.
+fn ops_for(ws: &dyn Workspace, request: &str, hits: Option<&Hits>) -> String {
+    let lexical = lexical_ops(ws, request);
+    let Some(hits) = hits else {
+        return ops_block(&lexical, true);
+    };
+    let mut list: Vec<&lsr_core::registry::OperatorSchema> = hits
+        .ops
+        .iter()
+        .filter_map(|t| ws.registry().get(t))
+        .filter(|op| !op.type_id.starts_with(lsr_core::pack::TYPE_PREFIX))
+        .collect();
+    for op in lexical {
+        if !list.iter().any(|o| o.type_id == op.type_id) {
+            list.push(op);
+        }
+    }
+    ops_block(&list, false)
+}
+
+/// The system prompt of planned mode. The standard text for an empty
+/// workspace is byte-for-byte what it has always been; a workspace with a
+/// network shows it (all assist levels that plan).
+pub(crate) fn plan_system(ws: &dyn Workspace, request: &str, hits: Option<&Hits>) -> String {
     let base = ws.network();
     let existing = if base.is_empty() {
         String::new()
     } else {
         format!(
-            "\nThe project already has these nodes (keep their names to change them): {}\n",
-            base.nodes()
-                .map(|n| format!("{} ({})", n.name, n.type_id))
-                .collect::<Vec<_>>()
-                .join(", ")
+            "\nThe project already has this network (JSON, in the same format as your answer):\n{}\nYour answer is the WHOLE network after your changes: keep every existing node under its exact name and type unless the request says to change it, and add or change only what the request needs.\n",
+            network_json(base)
         )
     };
-    let system = format!("{PLAN_RULES}{existing}{}", relevant_ops(ws, request));
+    let examples = hits.map_or(String::new(), |h| examples_block(&h.examples, true));
+    format!(
+        "{PLAN_RULES}{existing}{}{examples}",
+        ops_for(ws, request, hits)
+    )
+}
+
+/// The system prompt of the tool loop: the bare rules, or the standard
+/// text with the operator list.
+pub(crate) fn tools_system(
+    ws: &dyn Workspace,
+    request: &str,
+    level: Assist,
+    hits: Option<&Hits>,
+) -> String {
+    if level == Assist::Bare {
+        return BARE_RULES.to_owned();
+    }
+    let examples = hits.map_or(String::new(), |h| examples_block(&h.examples, false));
+    format!(
+        "{}{}{examples}",
+        system_prompt(ws),
+        ops_for(ws, request, hits)
+    )
+}
+
+/// One reviewer's pass over the network built: what is missing or wrong
+/// against the request, from the request and a plain description alone.
+fn self_review(llm: &mut dyn Llm, ws: &dyn Workspace, request: &str) -> Option<String> {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "complete": {"type": "boolean"},
+            "problems": {"type": "array", "items": {"type": "string", "maxLength": 300}, "maxItems": 6}
+        },
+        "required": ["complete", "problems"]
+    });
+    let messages = [
+        json!({"role": "system", "content": REVIEW_RULES}),
+        json!({"role": "user", "content": format!(
+            "Request:\n{request}\n\nThe network built:\n{}\nWhat is missing or wrong against the request?",
+            describe_network(ws.network()))}),
+    ];
+    let v = llm.json(&messages, &schema)?.ok()?;
+    let problems: Vec<&str> = v["problems"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    (v["complete"].as_bool() != Some(true) && !problems.is_empty()).then(|| problems.join("\n"))
+}
+
+fn build_planned(
+    llm: &mut dyn Llm,
+    agent: &mut Agent,
+    ws: &mut dyn Workspace,
+    request: &str,
+    o: &Opts,
+) -> Option<Run> {
+    let (trace, hits) = (o.trace, o.hits);
+    let schema = plan_schema(ws);
+    let full = o.level == Assist::Full;
+    let system = plan_system(ws, request, hits);
+    let mut limit = o.rounds;
+    let mut reviewed = !full;
     let mut messages = vec![
         json!({"role": "system", "content": system}),
         json!({"role": "user", "content": request}),
     ];
     let mut run = Run::default();
     let accept = agent.scopes.contains(&crate::lock::Scope::Accept);
-    while run.steps < rounds {
+    while run.steps < limit {
         run.steps += 1;
         // A degenerate reply (cut off, not JSON) is asked for once more.
         let plan = match llm.json(&messages, &schema)? {
@@ -594,6 +699,23 @@ fn build_planned(
         };
         if trace {
             eprintln!("[{}] plan {plan}", run.steps);
+        }
+        // Full: faults a staging run would only half report are named
+        // before anything is staged. On the last round the plan is staged
+        // anyway, so the network the model leaves is its best one.
+        if full {
+            let faults = validate_plan(&plan, ws.network(), ws.registry());
+            if !faults.is_empty() && run.steps < limit {
+                run.tool_errors += faults.len() as u32;
+                if trace {
+                    eprintln!("[{}] faults {faults:?}", run.steps);
+                }
+                messages.push(json!({"role": "assistant", "content": plan.to_string()}));
+                messages.push(json!({"role": "user", "content": format!(
+                    "That network has problems, found before it was staged:\n{}\nAnswer with the corrected WHOLE network as JSON (same names for nodes you keep).",
+                    faults.iter().take(12).cloned().collect::<Vec<_>>().join("\n"))}));
+                continue;
+            }
         }
         // Each round restages the whole plan on the network as accepted so far.
         agent.call(ws, "discard_changes", &json!({}));
@@ -693,6 +815,23 @@ fn build_planned(
             eprintln!("[{}] problems {problems:?}", run.steps);
         }
         if problems.is_empty() {
+            // Full: once the network is accepted clean, a reviewer reads
+            // the request and a description of it; what it finds is one
+            // more plan round (and a few to repair it).
+            if !reviewed && run.accepted {
+                reviewed = true;
+                if let Some(notes) = self_review(llm, ws, request) {
+                    if trace {
+                        eprintln!("[{}] review {notes}", run.steps);
+                    }
+                    limit = limit.max(run.steps + REVIEW_ROUNDS);
+                    messages.push(json!({"role": "assistant", "content": plan.to_string()}));
+                    messages.push(json!({"role": "user", "content": format!(
+                        "A review of that network against the request found:\n{notes}\nAnswer with the corrected WHOLE network as JSON (same names for nodes you keep)."
+                    )}));
+                    continue;
+                }
+            }
             break;
         }
         messages.push(json!({"role": "assistant", "content": plan.to_string()}));
@@ -703,9 +842,10 @@ fn build_planned(
     Some(run)
 }
 
-/// Runs one request to completion (or `max_steps` model turns). A model
-/// with structured output plans the network as JSON ([`build_planned`]);
-/// any other calls the tools turn by turn.
+/// Runs one request to completion (or `max_steps` model turns) at the
+/// standard assist level. A model with structured output plans the
+/// network as JSON ([`build_planned`]); any other calls the tools turn by
+/// turn.
 pub fn build(
     llm: &mut dyn Llm,
     agent: &mut Agent,
@@ -713,11 +853,53 @@ pub fn build(
     request: &str,
     max_steps: u32,
 ) -> Run {
+    build_with(
+        llm,
+        agent,
+        ws,
+        request,
+        max_steps,
+        &mut Assistance::standard(),
+    )
+}
+
+/// What [`build_planned`] needs besides the request.
+struct Opts<'a> {
+    rounds: u32,
+    trace: bool,
+    level: Assist,
+    hits: Option<&'a Hits>,
+}
+
+/// [`build`] at the assist level of `assist` (`bare`: the plain tool loop;
+/// `full`: standard plus retrieval and the harness, see [`crate::assist`]).
+pub fn build_with(
+    llm: &mut dyn Llm,
+    agent: &mut Agent,
+    ws: &mut dyn Workspace,
+    request: &str,
+    max_steps: u32,
+    assist: &mut Assistance,
+) -> Run {
     let trace = std::env::var("LSR_AGENT_TRACE").is_ok_and(|v| v == "1");
-    if let Some(run) = build_planned(llm, agent, ws, request, max_steps.min(4), trace) {
-        return run;
+    let level = assist.level;
+    let hits = assist.search(request);
+    if level != Assist::Bare {
+        let rounds = match level {
+            Assist::Full => max_steps.min(FULL_ROUNDS),
+            _ => max_steps.min(4),
+        };
+        let opts = Opts {
+            rounds,
+            trace,
+            level,
+            hits: hits.as_ref(),
+        };
+        if let Some(run) = build_planned(llm, agent, ws, request, &opts) {
+            return run;
+        }
     }
-    build_tools(llm, agent, ws, request, max_steps)
+    build_tools(llm, agent, ws, request, max_steps, level, hits.as_ref())
 }
 
 fn build_tools(
@@ -726,6 +908,8 @@ fn build_tools(
     ws: &mut dyn Workspace,
     request: &str,
     max_steps: u32,
+    level: Assist,
+    hits: Option<&Hits>,
 ) -> Run {
     let tools: Vec<Value> = agent
         .tools()
@@ -735,9 +919,12 @@ fn build_tools(
     // LSR_AGENT_TRACE=1 prints the operators offered, every tool call and
     // the start of its result.
     let trace = std::env::var("LSR_AGENT_TRACE").is_ok_and(|v| v == "1");
-    let system = format!("{}{}", system_prompt(ws), relevant_ops(ws, request));
-    if trace {
-        eprintln!("{}", relevant_ops(ws, request));
+    // Bare: no operator list, no nudges and no repair prompts; the model
+    // finds operators with the tools and stops when it has no more calls.
+    let bare = level == Assist::Bare;
+    let system = tools_system(ws, request, level, hits);
+    if trace && !bare {
+        eprintln!("{}", ops_for(ws, request, hits));
     }
     let mut messages = vec![
         json!({"role": "system", "content": system}),
@@ -797,7 +984,7 @@ fn build_tools(
                 eprintln!("[{}] text: {}", run.steps, run.final_text);
             }
             // Built but never accepted: ask once to accept and check.
-            if !agent.staged().is_empty() && !nudged {
+            if !bare && !agent.staged().is_empty() && !nudged {
                 nudged = true;
                 messages.push(json!({"role": "user", "content": "Call accept_changes now, then fix any errors it reports."}));
                 continue;
@@ -806,7 +993,7 @@ fn build_tools(
             // a few times before giving up.
             let mut problems = last_failed.clone();
             problems.extend(run.errors.iter().map(|e| format!("node error {e}")));
-            if !problems.is_empty() && repairs < 3 {
+            if !bare && !problems.is_empty() && repairs < 3 {
                 repairs += 1;
                 messages.push(json!({"role": "user", "content": format!(
                     "The request is not done; these failed:\n{}\nFix them with tool calls (use the operator types and node names the errors suggest), then call accept_changes.",
@@ -867,7 +1054,7 @@ fn build_tools(
         }
         // A small model can repeat the same failing calls turn after turn:
         // say so plainly, then give up on the third repeat.
-        if !failed.is_empty() && failed == last_failed {
+        if !bare && !failed.is_empty() && failed == last_failed {
             repeats += 1;
             if repeats >= 3 {
                 break;
@@ -1165,5 +1352,344 @@ mod tests {
         assert!(run.accepted, "nudged to accept");
         assert_eq!(ws.network().len(), 2);
         assert!(system_prompt(&ws).contains("img.noise — "));
+    }
+
+    // ---- assist levels ----
+
+    use crate::assist::testkit::tiny_registry;
+
+    fn accepting_agent() -> Agent {
+        Agent::new(
+            Scope::defaults()
+                .into_iter()
+                .chain([Scope::Accept])
+                .collect(),
+            ShowLock::default(),
+        )
+    }
+
+    /// The standard prompts, byte for byte as they were before assist
+    /// levels (the golden files were written by the code of that day), so
+    /// results stay comparable.
+    #[test]
+    fn standard_prompts_are_unchanged_for_an_empty_workspace() {
+        let ws = NetworkWorkspace::new(tiny_registry());
+        assert_eq!(
+            plan_system(&ws, "a blurred noise", None),
+            include_str!("../tests/golden/standard_plan_system.txt")
+        );
+        assert_eq!(
+            tools_system(&ws, "a blurred noise", Assist::Standard, None),
+            include_str!("../tests/golden/standard_tools_system.txt")
+        );
+    }
+
+    /// A model that records what it is sent and builds one node.
+    struct Spy {
+        systems: Vec<String>,
+        chats: usize,
+        json_calls: usize,
+        script: Vec<Value>,
+    }
+
+    impl Spy {
+        fn new() -> Self {
+            Self {
+                systems: Vec::new(),
+                chats: 0,
+                json_calls: 0,
+                script: vec![
+                    json!({"content": "", "tool_calls": [{"name": "build_network",
+                    "arguments": {"nodes": [{"name": "noise1", "type": "img.noise"}], "wires": []}}]}),
+                ],
+            }
+        }
+    }
+
+    impl Llm for Spy {
+        fn chat(&mut self, messages: &[Value], _: &[Value]) -> Result<Value, String> {
+            self.chats += 1;
+            self.systems
+                .push(messages[0]["content"].as_str().unwrap().to_owned());
+            Ok(if self.script.is_empty() {
+                json!({"content": "done", "tool_calls": []})
+            } else {
+                self.script.remove(0)
+            })
+        }
+        fn name(&self) -> String {
+            "spy".into()
+        }
+        fn json(&mut self, _: &[Value], _: &Value) -> Option<Result<Value, String>> {
+            self.json_calls += 1;
+            None
+        }
+    }
+
+    #[test]
+    fn bare_sends_no_operator_list_and_no_extra_prompts() {
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut agent = accepting_agent();
+        let mut llm = Spy::new();
+        let run = build_with(
+            &mut llm,
+            &mut agent,
+            &mut ws,
+            "a noise",
+            40,
+            &mut Assistance::new(Assist::Bare),
+        );
+        assert_eq!(llm.json_calls, 0, "no planned mode");
+        assert_eq!(llm.systems[0], BARE_RULES);
+        assert!(!llm.systems[0].contains("img.noise"), "no operator list");
+        assert!(!llm.systems[0].contains("Operators"));
+        // Built, never accepted, the model says it is done: bare stops
+        // there (standard asks it to accept).
+        assert_eq!(llm.chats, 2);
+        assert_eq!(run.steps, 2);
+        assert_eq!(
+            ws.network.len(),
+            1,
+            "what is staged is applied for the record"
+        );
+
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut agent = accepting_agent();
+        let mut std_llm = Spy::new();
+        build_with(
+            &mut std_llm,
+            &mut agent,
+            &mut ws,
+            "a noise",
+            40,
+            &mut Assistance::standard(),
+        );
+        assert!(
+            std_llm.systems[0].contains("img.noise — "),
+            "standard lists operators"
+        );
+        assert!(std_llm.systems[0].contains("Operators for this request"));
+        assert!(
+            std_llm.chats > 2,
+            "standard nudges to accept: {}",
+            std_llm.chats
+        );
+    }
+
+    fn seeded() -> NetworkWorkspace {
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut agent = accepting_agent();
+        agent.call(
+            &mut ws,
+            "build_network",
+            &json!({"nodes": [
+                {"name": "noise1", "type": "img.noise", "params": {"scale": "2 + sin(time)"}},
+                {"name": "blur1", "type": "img.blur", "params": {"size": 9}}],
+                "wires": [{"from": "noise1", "to": "blur1", "input": "in"}]}),
+        );
+        agent.accept(&mut ws, "seed").unwrap();
+        ws
+    }
+
+    /// Before assist levels the standard planned prompt named the existing
+    /// nodes and types only: not their parameters, expressions or wires, so
+    /// an edit task ("fix the blur") worked blind. Standard and full now
+    /// show the network.
+    #[test]
+    fn planned_mode_shows_the_current_network_when_there_is_one() {
+        let ws = seeded();
+        for hits in [None, Some(&Hits::default())] {
+            let s = plan_system(&ws, "make the blur softer", hits);
+            assert!(s.contains(r#""name":"noise1""#), "{s}");
+            assert!(s.contains("2 + sin(time)"), "expression shown: {s}");
+            assert!(s.contains(r#""value":9"#), "parameter shown: {s}");
+            assert!(
+                s.contains(r#"{"from":"noise1.out","to":"blur1.in"}"#),
+                "wire shown: {s}"
+            );
+            assert!(
+                s.contains("keep every existing node under its exact name"),
+                "{s}"
+            );
+        }
+        // And it is what the model is sent.
+        let mut ws = seeded();
+        let mut llm = FullLlm::new(vec![json!({"nodes": [], "wires": []})], vec![]);
+        build_with(
+            &mut llm,
+            &mut accepting_agent(),
+            &mut ws,
+            "make the blur softer",
+            40,
+            &mut Assistance::standard(),
+        );
+        let first = &llm.log[0].1[0]["content"];
+        assert!(first.as_str().unwrap().contains("blur1"), "{first}");
+        // An empty workspace shows nothing of the kind.
+        let empty = NetworkWorkspace::new(tiny_registry());
+        assert!(!plan_system(&empty, "x", None).contains("already has"));
+    }
+
+    /// Structured-output model: replays plans, and reviews.
+    struct FullLlm {
+        plans: Vec<Value>,
+        reviews: Vec<Value>,
+        /// (was a review, messages) per call.
+        log: Vec<(bool, Vec<Value>)>,
+    }
+
+    impl FullLlm {
+        fn new(plans: Vec<Value>, reviews: Vec<Value>) -> Self {
+            Self {
+                plans,
+                reviews,
+                log: Vec::new(),
+            }
+        }
+    }
+
+    impl Llm for FullLlm {
+        fn chat(&mut self, _: &[Value], _: &[Value]) -> Result<Value, String> {
+            Err("tools are not used with a planner".into())
+        }
+        fn name(&self) -> String {
+            "full".into()
+        }
+        fn json(&mut self, messages: &[Value], schema: &Value) -> Option<Result<Value, String>> {
+            let review = schema["properties"].get("complete").is_some();
+            self.log.push((review, messages.to_vec()));
+            let queue = if review {
+                &mut self.reviews
+            } else {
+                &mut self.plans
+            };
+            Some(if queue.is_empty() {
+                Err("nothing scripted".into())
+            } else {
+                Ok(queue.remove(0))
+            })
+        }
+    }
+
+    fn user_text(m: &[Value]) -> String {
+        m.last().unwrap()["content"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn full_checks_plans_before_staging_and_reviews_the_result() {
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut llm = FullLlm::new(
+            vec![
+                // Round 1: a parameter that does not exist, and a blur with
+                // nothing wired into it.
+                json!({"nodes": [{"name": "blur1", "type": "img.blur", "params": [{"name": "radius", "value": 3}]}], "wires": []}),
+                // Round 2: right.
+                json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
+                                 {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]}],
+                       "wires": [{"from": "noise1.out", "to": "blur1.in"}]}),
+                // Round 3, after the review: it moves.
+                json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
+                                 {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]},
+                                 {"name": "lfo1", "type": "sig.lfo", "params": []}],
+                       "wires": [{"from": "noise1.out", "to": "blur1.in"}, {"from": "lfo1.out", "to": "blur1.size"}]}),
+            ],
+            vec![
+                json!({"complete": false, "problems": ["nothing moves; the request asks for motion"]}),
+            ],
+        );
+        let run = build_with(
+            &mut llm,
+            &mut accepting_agent(),
+            &mut ws,
+            "a blurred noise that moves",
+            40,
+            &mut Assistance::new(Assist::Full),
+        );
+        assert!(run.llm_error.is_none(), "{run:?}");
+        assert_eq!(run.steps, 3, "{run:?}");
+        assert!(run.accepted);
+        assert_eq!(ws.network.len(), 3);
+
+        // The repair message after round 1 names the node and the options.
+        let repair = user_text(&llm.log[1].1);
+        assert!(repair.contains("found before it was staged"), "{repair}");
+        assert!(
+            repair.contains("node `blur1` (img.blur): no parameter `radius`"),
+            "{repair}"
+        );
+        assert!(
+            repair.contains("its parameters are: size, mode"),
+            "{repair}"
+        );
+        assert!(repair.contains("required input `in`"), "{repair}");
+
+        // The review saw the request and a description of the network, and
+        // nothing else.
+        let (is_review, msgs) = &llm.log[2];
+        assert!(*is_review);
+        assert_eq!(msgs.len(), 2);
+        let text = user_text(msgs);
+        assert!(text.contains("a blurred noise that moves"), "{text}");
+        assert!(text.contains("- blur1 (img.blur): size = 3"), "{text}");
+        assert!(text.contains("- noise1.out -> blur1.in"), "{text}");
+
+        // What it found went back as one more plan round.
+        let (is_review, msgs) = &llm.log[3];
+        assert!(!*is_review);
+        let text = user_text(msgs);
+        assert!(
+            text.contains("A review of that network") && text.contains("nothing moves"),
+            "{text}"
+        );
+        // Reviewed once: a clean third round ends it.
+        assert_eq!(llm.log.len(), 4);
+    }
+
+    #[test]
+    fn full_allows_six_repair_rounds_and_standard_three() {
+        let bad = json!({"nodes": [{"name": "x", "type": "img.nope", "params": []}], "wires": []});
+        for (level, steps) in [(Assist::Full, FULL_ROUNDS), (Assist::Standard, 4)] {
+            let mut ws = NetworkWorkspace::new(tiny_registry());
+            let mut llm = FullLlm::new(vec![bad.clone(); 12], vec![]);
+            let run = build_with(
+                &mut llm,
+                &mut accepting_agent(),
+                &mut ws,
+                "anything",
+                40,
+                &mut Assistance::new(level),
+            );
+            assert_eq!(run.steps, steps, "{level}");
+        }
+    }
+
+    #[test]
+    fn full_retrieval_goes_into_the_prompt_as_full_schemas_and_examples() {
+        let ws = NetworkWorkspace::new(tiny_registry());
+        let example = crate::assist::Example {
+            id: "demo".into(),
+            description: "Blurred noise.".into(),
+            network: seeded().network,
+        };
+        let hits = Hits {
+            ops: vec!["sig.lfo".into()],
+            examples: vec![example],
+        };
+        let s = plan_system(&ws, "a blurred noise", Some(&hits));
+        // The semantic hit leads, then the lexical ones.
+        let lfo = s.find("sig.lfo:").unwrap();
+        let blur = s.find("img.blur:").unwrap();
+        assert!(lfo < blur, "{s}");
+        assert!(s.contains("Worked examples of similar networks"), "{s}");
+        assert!(s.contains("Example 1 - Blurred noise."), "{s}");
+        assert!(
+            s.contains(r#"{"from":"noise1.out","to":"blur1.in"}"#),
+            "{s}"
+        );
+        // The tool loop gets the examples in the shape build_network takes.
+        let t = tools_system(&ws, "a blurred noise", Assist::Full, Some(&hits));
+        assert!(t.contains(r#""params":{"scale":"2 + sin(time)"}"#), "{t}");
+        // Standard text is a prefix of nothing here: no examples without hits.
+        assert!(!plan_system(&ws, "a blurred noise", None).contains("Worked examples"));
     }
 }

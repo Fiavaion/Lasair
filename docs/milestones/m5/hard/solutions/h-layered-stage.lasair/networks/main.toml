@@ -1,0 +1,62 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "floor"
+type = "img.ramp"
+pos = [0.0, 0.0]
+params.colour_a = [0.6, 0.1, 0.2, 1.0]
+params.colour_b = [0.0, 0.0, 0.1, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 1
+name = "pentagon"
+type = "img.shape"
+pos = [0.0, 140.0]
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.3, 0.3]
+
+[[node]]
+id = 2
+name = "grid"
+type = "img.tile"
+pos = [220.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.repeat = [3.0, 3.0]
+
+[[node]]
+id = 3
+name = "lit"
+type = "img.composite"
+pos = [440.0, 0.0]
+inputs.a = { node = 2, output = "out" }
+inputs.b = { node = 0, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 4
+name = "mist"
+type = "img.noise"
+pos = [0.0, 280.0]
+params.scale = 2.0
+params.z = { value = 0.0, expr = "time * 0.1" }
+
+[[node]]
+id = 5
+name = "shade"
+type = "img.composite"
+pos = [660.0, 0.0]
+inputs.a = { node = 3, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.operation = "multiply"
+
+[[node]]
+id = 6
+name = "stage"
+type = "cmp.window"
+pos = [880.0, 0.0]
+inputs.in = { node = 5, output = "out" }

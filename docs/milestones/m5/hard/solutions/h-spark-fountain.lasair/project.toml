@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Spark fountain"
+description = "Reference solution for h-spark-fountain."
+resolution = [1280, 720]

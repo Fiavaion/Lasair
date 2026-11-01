@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Unwired controls"
+description = "Seed for h-wire-the-signals."
+resolution = [1280, 720]

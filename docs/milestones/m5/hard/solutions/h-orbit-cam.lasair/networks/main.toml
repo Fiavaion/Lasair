@@ -1,0 +1,44 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "ball"
+type = "msh.sphere"
+pos = [0.0, 0.0]
+params.radius = 0.5
+
+[[node]]
+id = 1
+name = "hoop"
+type = "msh.torus"
+pos = [0.0, 140.0]
+params.radius = 1.0
+params.thickness = 0.1
+
+[[node]]
+id = 2
+name = "orange"
+type = "mat.toon"
+pos = [0.0, 280.0]
+
+[[node]]
+id = 3
+name = "cyan"
+type = "mat.unlit"
+pos = [0.0, 420.0]
+params.colour = [0.1, 0.9, 1.0, 1.0]
+
+[[node]]
+id = 4
+name = "camera"
+type = "img.render"
+pos = [220.0, 0.0]
+inputs.geo = { node = 0, output = "out" }
+inputs.geo2 = { node = 1, output = "out" }
+inputs.mat = { node = 2, output = "out" }
+inputs.mat2 = { node = 3, output = "out" }
+params.azimuth = { value = 30.0, expr = "time * 6" }
+params.distance = 5.0
+params.elevation = 25.0

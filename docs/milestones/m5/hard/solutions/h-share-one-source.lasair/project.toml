@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Shared source"
+description = "Reference solution for h-share-one-source."
+resolution = [1280, 720]

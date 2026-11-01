@@ -1,0 +1,43 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.z = { value = 0.0, expr = "time * 0.4" }
+
+[[node]]
+id = 1
+name = "hard"
+type = "img.threshold"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.softness = 0.0
+params.threshold = 0.5
+
+[[node]]
+id = 2
+name = "ramp"
+type = "img.ramp"
+pos = [0.0, 140.0]
+params.colour_a = [0.15, 0.02, 0.3, 1.0]
+params.colour_b = [1.0, 0.55, 0.1, 1.0]
+
+[[node]]
+id = 3
+name = "colour"
+type = "img.lookup"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+inputs.lut = { node = 2, output = "out" }
+
+[[node]]
+id = 4
+name = "flip"
+type = "img.mirror"
+pos = [660.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.axis = "left_to_right"

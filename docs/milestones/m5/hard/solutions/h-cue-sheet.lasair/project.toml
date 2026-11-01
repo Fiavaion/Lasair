@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Cue sheet"
+description = "Reference solution for h-cue-sheet."
+resolution = [1280, 720]

@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Three looks"
+description = "Reference solution for h-three-looks."
+resolution = [1280, 720]

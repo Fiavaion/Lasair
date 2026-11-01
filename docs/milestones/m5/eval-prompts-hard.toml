@@ -1,0 +1,302 @@
+# M5 AC1, hard tier: 15 prompts that separate the Claude 5.5 models
+# (`lasair agent eval --prompts docs/milestones/m5/eval-prompts-hard.toml`).
+# The 20-prompt set in eval-prompts.toml scores all three at 20/20.
+#
+# Same file format, with the checks of `crates/lsr-cli/src/agent_check.rs`
+# (every check is one point; the report gives points/max per prompt and a
+# score per run next to the valid count):
+#   require    node type prefixes that must be present
+#   min_nodes, max_nodes
+#   animated   something outside the SIG nodes moves
+#   paths      ["img.noise > img.feedback > cmp.window"]: wires lead through
+#              nodes of these type prefixes in this order (others may lie between)
+#   params     {type, name, eq | any_of | min | max | contains}: the stored value
+#              of a parameter (default if untouched) on some node of that type
+#   exprs      {type, param?, contains?, bind?, from?}: a parameter driven by an
+#              expression containing a substring, or by a channel binding
+#   count      {type, min?, max?}: how many nodes of that type
+#   seed       a project directory the run starts from (edit and debug tasks)
+#   keep       node names that must survive the edit
+#
+# Operators are named by plain description in the text; the checks name the types.
+# Reference solutions (full points) are in hard/solutions/<id>.lasair and the
+# broken or unfinished starting projects in hard/seeds/<id>.lasair; the test
+# `agent_check::tests` scores both without a model.
+#
+# Run it with --allow-python-ops: Python expressions the model writes are
+# otherwise not evaluated and count as node errors.
+
+# ---- Large multi-constraint builds ------------------------------------------
+
+[[prompt]]
+id = "h-tunnel-two-screens"
+text = """I want a tunnel look for two projectors. Start with rich, cloudy colour noise built from four layers of detail, and fold it into an eight-way kaleidoscope. It should leave soft trails that slowly spiral outwards and fade away instead of piling up for ever. Let the colours cycle with time, put a glow on the bright parts, and send the finished picture to two separate output windows."""
+require = ["img.noise", "img.kaleidoscope", "img.feedback", "img.transform", "img.composite", "img.hsv_adjust", "img.bloom", "cmp.window"]
+min_nodes = 10
+max_nodes = 20
+animated = true
+paths = [
+  "img.noise > img.kaleidoscope > img.composite > img.hsv_adjust > img.bloom > cmp.window",
+  "img.feedback > img.transform > img.composite > img.feedback",
+]
+params = [
+  { type = "img.noise", name = "octaves", eq = 4 },
+  { type = "img.kaleidoscope", name = "segments", eq = 8 },
+  { type = "img.level", name = "brightness", max = 0.99 },
+]
+exprs = [{ type = "img.hsv_adjust", param = "hue" }]
+count = [{ type = "cmp.window", min = 2, max = 2 }]
+
+[[prompt]]
+id = "h-layered-stage"
+text = """Make a stage backdrop from three layers. At the bottom a gradient that glows outwards from the centre. On top of it, a grid of pentagons, three across and three down, added onto the gradient so they light it up. Over both, large soft cloudy noise (just a few big blobs, slowly moving) that multiplies the whole thing so it darkens unevenly. Show it in one output window, and use no more nodes than you need."""
+require = ["img.ramp", "img.shape", "img.tile", "img.noise", "img.composite", "cmp.window"]
+min_nodes = 7
+max_nodes = 12
+animated = true
+paths = [
+  "img.shape > img.tile > img.composite > img.composite > cmp.window",
+  "img.ramp > img.composite > img.composite",
+  "img.noise > img.composite > cmp.window",
+]
+params = [
+  { type = "img.ramp", name = "type", eq = "radial" },
+  { type = "img.shape", name = "shape", eq = "polygon" },
+  { type = "img.shape", name = "sides", eq = 5 },
+  { type = "img.tile", name = "repeat", eq = [3, 3] },
+  { type = "img.composite", name = "operation", eq = "add" },
+  { type = "img.composite", name = "operation", eq = "multiply" },
+  { type = "img.noise", name = "scale", max = 3 },
+]
+count = [
+  { type = "img.composite", min = 2, max = 2 },
+  { type = "cmp.window", min = 1, max = 1 },
+]
+
+[[prompt]]
+id = "h-three-looks"
+text = """Set up three looks I can cycle through: slowly drifting clouds, a bold six-sided shape that spins, and a plain glow that fades from the centre. A switcher should move through them by itself in a 12 second loop, crossfading smoothly instead of cutting, and come back round to the clouds without a jump. Output it to a window."""
+require = ["img.noise", "img.shape", "img.ramp", "img.switch", "sig.timer", "cmp.window"]
+min_nodes = 7
+animated = true
+paths = [
+  "img.noise > img.switch > cmp.window",
+  "img.shape > img.switch",
+  "img.ramp > img.switch",
+]
+params = [
+  { type = "img.shape", name = "sides", eq = 6 },
+  { type = "img.switch", name = "blend", eq = true },
+  { type = "sig.timer", name = "length", eq = 12 },
+]
+exprs = [
+  { type = "img.switch", param = "index", from = "sig." },
+  { type = "img.shape", param = "rotate" },
+]
+count = [{ type = "img.switch", min = 1, max = 1 }]
+
+# ---- Cross-family chains ----------------------------------------------------
+
+[[prompt]]
+id = "h-torus-dust"
+text = """Take a ring-shaped doughnut surface and sprinkle exactly 5000 points over it. Make the points swirl around with a flowing turbulence that keeps changing over time, colour them by how high they are, and draw them as small round dots seen by a camera that slowly orbits around the ring."""
+require = ["msh.torus", "msh.scatter", "pnt.noise", "pnt.colour", "mat.point_sprite", "img.render"]
+min_nodes = 6
+animated = true
+paths = [
+  "msh.torus > msh.scatter > pnt.noise > pnt.colour > img.render",
+  "mat.point_sprite > img.render",
+]
+params = [{ type = "msh.scatter", name = "count", eq = 5000 }]
+exprs = [
+  { type = "pnt.noise", param = "evolution", contains = "time" },
+  { type = "img.render", param = "azimuth", contains = "time" },
+]
+
+[[prompt]]
+id = "h-spark-fountain"
+text = """A fountain of sparks: particles born in a small ball in the middle of the screen, thrown upward and pulled back down, each living two seconds, about 3000 of them born every second. Draw them as glowing dots on black and add a glow on top so they bloom where they pile up."""
+require = ["pnt.particles", "img.render_points", "img.bloom"]
+min_nodes = 3
+paths = ["pnt.particles > img.render_points > img.bloom"]
+params = [
+  { type = "pnt.particles", name = "life", eq = 2 },
+  { type = "pnt.particles", name = "rate", min = 2700, max = 3300 },
+  { type = "pnt.particles", name = "radius", max = 0.3 },
+  { type = "pnt.particles", name = "emitter", eq = "sphere" },
+  { type = "img.render_points", name = "blend", eq = "add" },
+]
+
+[[prompt]]
+id = "h-orbit-cam"
+text = """Build a small 3D scene: a ball half a unit in radius, with a big ring around it (the ring one unit across to the middle of its tube, the tube a tenth of a unit thick). Give the ball a warm cartoon-shaded look and the ring a flat, unlit bright cyan. The camera should sit five units away, look down at the scene from 25 degrees up, and circle slowly around it all the time."""
+require = ["msh.sphere", "msh.torus", "mat.toon", "mat.unlit", "img.render"]
+min_nodes = 5
+animated = true
+paths = [
+  "msh.sphere > img.render",
+  "msh.torus > img.render",
+  "mat.toon > img.render",
+  "mat.unlit > img.render",
+]
+params = [
+  { type = "msh.sphere", name = "radius", eq = 0.5 },
+  { type = "msh.torus", name = "radius", eq = 1 },
+  { type = "msh.torus", name = "thickness", eq = 0.1 },
+  { type = "img.render", name = "elevation", eq = 25 },
+  { type = "img.render", name = "distance", eq = 5 },
+]
+exprs = [{ type = "img.render", param = "azimuth", contains = "time" }]
+count = [{ type = "img.render", min = 1, max = 1 }]
+
+[[prompt]]
+id = "h-breathing-clouds"
+text = """Make drifting clouds that breathe: the picture should swell to twice its size and shrink to half, one full breath every four seconds. Separately, let the colours wander slowly on their own, loosely and not in step with the breathing. Drive both with signal nodes feeding the picture controls, not with typed formulas."""
+require = ["img.noise", "img.transform", "img.hsv_adjust", "sig.lfo", "sig.math", "sig.noise"]
+min_nodes = 6
+animated = true
+paths = ["sig.lfo > sig.math"]
+params = [
+  { type = "sig.lfo", name = "frequency", eq = 0.25 },
+  { type = "sig.math", name = "to_min", eq = 0.5 },
+  { type = "sig.math", name = "to_max", eq = 2 },
+]
+exprs = [
+  { type = "img.transform", param = "scale", bind = true, from = "sig.math" },
+  { type = "img.hsv_adjust", param = "hue", bind = true, from = "sig.noise" },
+]
+
+[[prompt]]
+id = "h-cue-sheet"
+text = """Keep a little cue sheet in a table: three rows called dim, mid and full, with a brightness level of 0.2, 0.6 and 1 and a spin in degrees of 0, 15 and 45. Show slowly moving clouds. Their brightness and their rotation must read the 'mid' row of that table (not copied numbers), so editing the table changes the picture."""
+require = ["dat.table", "img.noise", "img.level", "img.transform"]
+min_nodes = 4
+animated = true
+params = [
+  { type = "dat.table", name = "rows", contains = "0.6" },
+  { type = "dat.table", name = "rows", contains = "45" },
+  { type = "dat.table", name = "rows", contains = "full" },
+]
+exprs = [
+  { type = "img.level", param = "brightness", contains = "op(" },
+  { type = "img.transform", param = "rotate", contains = "op(" },
+  { type = "img.noise", param = "z", contains = "time" },
+]
+
+# ---- Ambiguity: the look decides the structure ------------------------------
+
+[[prompt]]
+id = "h-worn-tape"
+text = """Make animated noise look like a worn-out video tape being played back: the picture is soft and smeared, leaves ghosts of where it just was, and flickers in brightness now and then."""
+require = ["img.noise", "img.blur", "img.feedback", "img.level"]
+min_nodes = 5
+animated = true
+params = [{ type = "img.blur", name = "size", min = 6 }]
+exprs = [{ type = "img.level", param = "brightness" }]
+paths = ["img.feedback > img.composite"]
+
+[[prompt]]
+id = "h-stark-poster"
+text = """Turn moving noise into a stark two-tone poster: hard-edged shapes with no soft grey anywhere, then coloured with a gradient from a dark purple to a bright orange, and mirrored so the left half is reflected onto the right."""
+require = ["img.noise", "img.threshold", "img.ramp", "img.lookup", "img.mirror"]
+min_nodes = 5
+animated = true
+paths = [
+  "img.noise > img.threshold > img.lookup > img.mirror",
+  "img.ramp > img.lookup",
+]
+params = [
+  { type = "img.threshold", name = "softness", max = 0.05 },
+  { type = "img.mirror", name = "axis", eq = "left_to_right" },
+]
+
+# ---- Edit and debug tasks from a seed project --------------------------------
+
+[[prompt]]
+id = "h-fix-broken-chain"
+text = """My patch is broken. The picture comes out tiny and blocky, something is throwing errors, and the blur I added does nothing. Please fix it so it ends up sharp at full HD (1920 by 1080), the blur really is in the chain, and nothing reports errors. Keep the nodes I named (base_noise, blur_soft, wobble, glow, main_out); fix, don't rebuild."""
+seed = "docs/milestones/m5/hard/seeds/h-fix-broken-chain.lasair"
+keep = ["base_noise", "blur_soft", "wobble", "shake", "glow", "main_out"]
+min_nodes = 7
+max_nodes = 9
+paths = ["img.noise > img.blur > img.transform > img.resolution > img.bloom > cmp.window"]
+params = [
+  { type = "img.resolution", name = "mode", eq = "pixels" },
+  { type = "img.resolution", name = "width", eq = 1920 },
+  { type = "img.resolution", name = "height", eq = 1080 },
+]
+exprs = [{ type = "img.transform", param = "rotate" }]
+
+[[prompt]]
+id = "h-share-one-source"
+text = """This patch has two identical chains, each with its own copy of the same noise. Change it so both chains draw from one shared noise instead of two copies, and leave the rest exactly as it is: the two blurs keep their different strengths, and warm, cool, mix, master and out must all still be there."""
+seed = "docs/milestones/m5/hard/seeds/h-share-one-source.lasair"
+keep = ["warm", "cool", "mix", "master", "out"]
+min_nodes = 8
+max_nodes = 9
+paths = ["img.noise > img.blur > img.hsv_adjust > img.composite > img.level > cmp.window"]
+params = [
+  { type = "img.noise", name = "scale", eq = 5 },
+  { type = "img.noise", name = "seed", eq = 3 },
+  { type = "img.blur", name = "size", eq = 6 },
+  { type = "img.blur", name = "size", eq = 20 },
+]
+count = [
+  { type = "img.noise", min = 1, max = 1 },
+  { type = "img.blur", min = 2, max = 2 },
+  { type = "img.hsv_adjust", min = 2, max = 2 },
+]
+
+[[prompt]]
+id = "h-fix-trails"
+text = """My trails never build up: the picture just shows the current frame, and when I once got an echo it went black almost at once. Fix this patch so the noise leaves slow, bright trails that drift and fade out gradually. Keep my nodes (pattern, memory, drift, fade, accumulate, stage_out) and don't rebuild it."""
+seed = "docs/milestones/m5/hard/seeds/h-fix-trails.lasair"
+keep = ["pattern", "memory", "drift", "fade", "accumulate", "stage_out"]
+min_nodes = 6
+max_nodes = 8
+animated = true
+paths = [
+  "img.feedback > img.transform > img.level > img.composite > img.feedback",
+  "img.noise > img.composite > cmp.window",
+]
+params = [
+  { type = "img.composite", name = "operation", any_of = ["add", "screen", "maximum"] },
+  { type = "img.level", name = "brightness", min = 0.5, max = 0.99 },
+]
+
+[[prompt]]
+id = "h-show-change-request"
+text = """This is my show patch. Make these changes and nothing else: the kaleidoscope should have twelve segments instead of six; the title text should read FINAL instead of DRAFT; and add a second, small output window titled Preview, 480 by 270 pixels, showing the same final picture as the main output. Everything I built must stay (fold, ring_spin, trail, grade, pulse, main_out and the rest)."""
+seed = "docs/milestones/m5/hard/seeds/h-show-change-request.lasair"
+keep = ["fold", "ring_spin", "trail", "grade", "pulse", "drift", "main_out"]
+min_nodes = 17
+max_nodes = 19
+animated = true
+paths = [
+  "img.noise > img.kaleidoscope > img.blend > img.composite > img.level > img.bloom > img.text > cmp.window",
+  "img.shape > img.transform > img.blur > img.blend",
+]
+params = [
+  { type = "img.kaleidoscope", name = "segments", eq = 12 },
+  { type = "img.text", name = "text", eq = "FINAL" },
+  { type = "cmp.window", name = "title", eq = "Preview" },
+  { type = "cmp.window", name = "width", eq = 480 },
+  { type = "cmp.window", name = "height", eq = 270 },
+]
+count = [
+  { type = "cmp.window", min = 2, max = 2 },
+  { type = "img.text", min = 1, max = 1 },
+]
+
+[[prompt]]
+id = "h-wire-the-signals"
+text = """I built the controls for this patch but never connected them. Make the brightness stage pulse with my 'pulse' signal and let the hue shift wander with my 'wander' signal. Connect them to the existing nodes, don't add new ones, and keep everything I made."""
+seed = "docs/milestones/m5/hard/seeds/h-wire-the-signals.lasair"
+keep = ["pulse", "wander", "mist", "hue_shift", "brightness_stage", "main_out"]
+min_nodes = 6
+max_nodes = 6
+animated = true
+exprs = [
+  { type = "img.level", param = "brightness", from = "sig.lfo" },
+  { type = "img.hsv_adjust", param = "hue", from = "sig.noise" },
+]

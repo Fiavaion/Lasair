@@ -12,8 +12,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use lsr_agent::assistant::{self, Anthropic, Llm, Ollama};
 use lsr_agent::lock::Scope;
 use lsr_agent::{Agent, ShowLock, Workspace};
-use serde::Deserialize;
 
+use crate::agent_check::{Prompts, copy_dir};
 use crate::serve::ServeWorkspace;
 
 #[derive(Debug, clap::Subcommand)]
@@ -83,29 +83,6 @@ fn scopes() -> BTreeSet<Scope> {
         .collect()
 }
 
-#[derive(Debug, Deserialize)]
-struct Prompts {
-    prompt: Vec<Prompt>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Prompt {
-    id: String,
-    text: String,
-    #[serde(default)]
-    require: Vec<String>,
-    #[serde(default = "one")]
-    min_nodes: usize,
-    /// Something must move: a parameter with an expression or a channel
-    /// binding, or a SIG node wired into another node.
-    #[serde(default)]
-    animated: bool,
-}
-
-fn one() -> usize {
-    1
-}
-
 pub fn run(cmd: AgentCommand) -> Result<()> {
     match cmd {
         AgentCommand::Ask {
@@ -160,8 +137,11 @@ fn eval(
     let prompts: Prompts = toml_edit::de::from_str(&text)?;
     let mut llm = llm(m)?;
     let tmp = std::env::temp_dir().join(format!("lsr-eval-{}", std::process::id()));
+    let registry = crate::project::library().0;
     let mut rows = String::new();
     let (mut valid, mut total) = (0, 0);
+    let (mut points, mut max_points) = (0, 0);
+    let mut score_sum = 0.0;
     let start = Instant::now();
     for p in prompts
         .prompt
@@ -171,55 +151,30 @@ fn eval(
         total += 1;
         let dir = tmp.join(format!("{}.lasair", p.id));
         let _ = std::fs::remove_dir_all(&dir);
+        if let Some(seed) = &p.seed {
+            copy_dir(seed, &dir).with_context(|| format!("seed {}", seed.display()))?;
+        }
         let t = Instant::now();
         let mut ws = ServeWorkspace::open(&dir, false, allow_python)?;
         let mut agent = Agent::new(scopes(), ShowLock::default());
         let run = assistant::build(llm.as_mut(), &mut agent, &mut ws, &p.text, m.max_steps);
         // Judge the network the model left, cooked afresh.
-        let errors = ws.cook_errors();
+        let errors: Vec<String> = ws.cook_errors().into_iter().map(|e| e.1).collect();
         let net = ws.network();
-        let types: Vec<&str> = net.nodes().map(|n| n.type_id.as_str()).collect();
-        let missing: Vec<&str> = p
-            .require
-            .iter()
-            .filter(|r| !types.iter().any(|t| t.starts_with(r.as_str())))
-            .map(String::as_str)
-            .collect();
-        let mut why = Vec::new();
-        if net.len() < p.min_nodes {
-            why.push(format!("{} nodes < {}", net.len(), p.min_nodes));
-        }
-        if !missing.is_empty() {
-            why.push(format!("missing {}", missing.join(", ")));
-        }
-        if !errors.is_empty() {
-            why.push(format!("{} node error(s): {}", errors.len(), errors[0].1));
-        }
-        // The motion must reach a node that is not itself a channel node
-        // (an LFO with an expression that drives nothing does not count).
-        let sig = |id| {
-            net.node(id)
-                .is_some_and(|n: &lsr_core::graph::Node| n.type_id.starts_with("sig."))
-        };
-        let moves = net.nodes().filter(|n| !sig(n.id)).any(|n| {
-            n.params
-                .values()
-                .any(|p| p.expr.is_some() || p.bind.is_some())
-        }) || net.wires().any(|w| sig(w.from.node) && !sig(w.to.node));
-        if p.animated && !moves {
-            why.push("nothing is animated".into());
-        }
-        if let Some(e) = &run.llm_error {
-            why.push(format!("model error: {e}"));
-        }
-        let ok = why.is_empty();
+        let verdict = p.judge(net, &registry, &errors, run.llm_error.as_deref());
+        let why = &verdict.why;
+        let ok = verdict.valid();
         valid += usize::from(ok);
-        let mut kinds: Vec<&str> = types.clone();
+        points += verdict.points;
+        max_points += verdict.max;
+        let score = 100.0 * verdict.points as f64 / verdict.max.max(1) as f64;
+        score_sum += score;
+        let mut kinds: Vec<&str> = net.nodes().map(|n| n.type_id.as_str()).collect();
         kinds.sort_unstable();
         kinds.dedup();
         let _ = writeln!(
             rows,
-            "| {} | {} | {} | {} | {}/{} | {:.0} s | {} |",
+            "| {} | {} | {} | {} | {}/{} | {:.0} s | {} | {}/{} ({score:.0}%) |",
             p.id,
             if ok { "valid" } else { "**invalid**" },
             net.len(),
@@ -227,22 +182,25 @@ fn eval(
             run.tool_errors,
             run.tool_calls,
             t.elapsed().as_secs_f64(),
-            why.join("; ").replace('|', "/")
+            why.join("; ").replace('|', "/"),
+            verdict.points,
+            verdict.max
         );
         eprintln!(
             "{:>20}: {}",
             p.id,
             if ok {
-                "valid".to_owned()
+                format!("valid {}/{}", verdict.points, verdict.max)
             } else {
-                why.join("; ")
+                format!("{}/{} {}", verdict.points, verdict.max, why.join("; "))
             }
         );
     }
     let _ = std::fs::remove_dir_all(&tmp);
     let pct = 100.0 * valid as f64 / total.max(1) as f64;
+    let mean_score = score_sum / total.max(1) as f64;
     let report = format!(
-        "# Network-generation eval\n\n**Model:** `{}` · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it).\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why |\n|---|---|---|---|---|---|---|\n{rows}",
+        "# Network-generation eval\n\n**Model:** `{}` · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Score:** {points}/{max_points} points (**{mean_score:.0}%** mean per prompt) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = every check passes: at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it). The hard tier adds wiring paths, parameter values, expressions and bindings, node counts, kept nodes and seed projects (see `agent_check.rs`). Every check is one point; Score = points earned / points possible.\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why | Score |\n|---|---|---|---|---|---|---|---|\n{rows}",
         llm.name(),
         path.display(),
         start.elapsed().as_secs_f64(),
@@ -252,6 +210,8 @@ fn eval(
         Some(o) => std::fs::write(o, &report)?,
         None => print!("{report}"),
     }
-    println!("{valid}/{total} valid ({pct:.0}%)");
+    println!(
+        "{valid}/{total} valid ({pct:.0}%), score {points}/{max_points} ({mean_score:.0}% mean)"
+    );
     Ok(())
 }

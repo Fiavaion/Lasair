@@ -1,6 +1,7 @@
 //! `lasair` — headless entry points (PRD §7.10).
 
 mod agent;
+mod agent_check;
 mod ai_host;
 mod bake;
 mod batch;

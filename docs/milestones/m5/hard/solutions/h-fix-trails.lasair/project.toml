@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Live trails"
+description = "Reference solution for h-fix-trails."
+resolution = [1280, 720]

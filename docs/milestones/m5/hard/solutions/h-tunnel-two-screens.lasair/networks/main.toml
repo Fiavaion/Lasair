@@ -1,0 +1,88 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.monochrome = false
+params.octaves = 4
+params.scale = 3.0
+params.z = { value = 0.0, expr = "time * 0.2" }
+
+[[node]]
+id = 1
+name = "fold"
+type = "img.kaleidoscope"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.segments = 8
+
+[[node]]
+id = 2
+name = "trail"
+type = "img.feedback"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+inputs.loop = { node = 5, output = "out" }
+
+[[node]]
+id = 3
+name = "spiral"
+type = "img.transform"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.rotate = 1.5
+params.scale = [1.02, 1.02]
+
+[[node]]
+id = 4
+name = "fade"
+type = "img.level"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.brightness = 0.96
+
+[[node]]
+id = 5
+name = "accumulate"
+type = "img.composite"
+pos = [1100.0, 0.0]
+inputs.a = { node = 1, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.operation = "screen"
+
+[[node]]
+id = 6
+name = "colour"
+type = "img.hsv_adjust"
+pos = [1320.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.hue = { value = 0.0, expr = "time * 20" }
+
+[[node]]
+id = 7
+name = "glow"
+type = "img.bloom"
+pos = [1540.0, 0.0]
+inputs.in = { node = 6, output = "out" }
+params.threshold = 0.6
+
+[[node]]
+id = 8
+name = "screen_left"
+type = "cmp.window"
+pos = [1760.0, 0.0]
+inputs.in = { node = 7, output = "out" }
+params.title = "Left"
+
+[[node]]
+id = 9
+name = "screen_right"
+type = "cmp.window"
+pos = [1760.0, 140.0]
+inputs.in = { node = 7, output = "out" }
+params.position = [700.0, 80.0]
+params.title = "Right"

@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Duplicate chains"
+description = "Seed for h-share-one-source."
+resolution = [1280, 720]

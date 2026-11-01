@@ -1,0 +1,68 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 8
+
+[[node]]
+id = 0
+name = "noise_a"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.scale = 5.0
+params.seed = 3
+params.z = { value = 0.0, expr = "time * 0.2" }
+
+[[node]]
+id = 1
+name = "blur_a"
+type = "img.blur"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.size = 6.0
+
+[[node]]
+id = 2
+name = "warm"
+type = "img.hsv_adjust"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.hue = 20.0
+
+[[node]]
+id = 3
+name = "blur_b"
+type = "img.blur"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.size = 20.0
+
+[[node]]
+id = 4
+name = "cool"
+type = "img.hsv_adjust"
+pos = [440.0, 140.0]
+inputs.in = { node = 3, output = "out" }
+params.hue = 200.0
+
+[[node]]
+id = 5
+name = "mix"
+type = "img.composite"
+pos = [660.0, 0.0]
+inputs.a = { node = 2, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 6
+name = "master"
+type = "img.level"
+pos = [880.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.brightness = 0.8
+
+[[node]]
+id = 7
+name = "out"
+type = "cmp.window"
+pos = [1100.0, 0.0]
+inputs.in = { node = 6, output = "out" }

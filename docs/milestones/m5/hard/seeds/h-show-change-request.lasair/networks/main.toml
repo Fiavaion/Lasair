@@ -1,0 +1,137 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 16
+
+[[node]]
+id = 0
+name = "pulse"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 0.2
+params.frequency = 0.5
+params.offset = 0.9
+
+[[node]]
+id = 1
+name = "drift"
+type = "sig.noise"
+pos = [0.0, 140.0]
+params.amplitude = 0.5
+params.frequency = 0.1
+
+[[node]]
+id = 2
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 280.0]
+params.scale = 3.0
+params.z = { value = 0.0, bind = { node = 1 } }
+
+[[node]]
+id = 3
+name = "fold"
+type = "img.kaleidoscope"
+pos = [220.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.segments = 6
+
+[[node]]
+id = 4
+name = "tint"
+type = "img.hsv_adjust"
+pos = [440.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.hue = 30.0
+params.saturation = 1.2
+
+[[node]]
+id = 5
+name = "ring"
+type = "img.shape"
+pos = [0.0, 420.0]
+params.shape = "circle"
+params.size = [0.6, 0.6]
+params.softness = 0.02
+
+[[node]]
+id = 6
+name = "ring_spin"
+type = "img.transform"
+pos = [220.0, 140.0]
+inputs.in = { node = 5, output = "out" }
+params.rotate = { value = 0.0, expr = "time * 10" }
+
+[[node]]
+id = 7
+name = "ring_soft"
+type = "img.blur"
+pos = [440.0, 140.0]
+inputs.in = { node = 6, output = "out" }
+params.size = 10.0
+
+[[node]]
+id = 8
+name = "mixer"
+type = "img.blend"
+pos = [660.0, 0.0]
+inputs.a = { node = 4, output = "out" }
+inputs.b = { node = 7, output = "out" }
+params.mix = 0.4
+
+[[node]]
+id = 9
+name = "trail"
+type = "img.feedback"
+pos = [880.0, 0.0]
+inputs.in = { node = 8, output = "out" }
+inputs.loop = { node = 11, output = "out" }
+
+[[node]]
+id = 10
+name = "trail_fade"
+type = "img.level"
+pos = [1100.0, 0.0]
+inputs.in = { node = 9, output = "out" }
+params.brightness = 0.92
+
+[[node]]
+id = 11
+name = "trail_mix"
+type = "img.composite"
+pos = [1320.0, 0.0]
+inputs.a = { node = 8, output = "out" }
+inputs.b = { node = 10, output = "out" }
+params.operation = "screen"
+
+[[node]]
+id = 12
+name = "grade"
+type = "img.level"
+pos = [1540.0, 0.0]
+inputs.in = { node = 11, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 0 } }
+params.contrast = 1.2
+
+[[node]]
+id = 13
+name = "glow"
+type = "img.bloom"
+pos = [1760.0, 0.0]
+inputs.in = { node = 12, output = "out" }
+params.threshold = 0.65
+
+[[node]]
+id = 14
+name = "title"
+type = "img.text"
+pos = [1980.0, 0.0]
+inputs.in = { node = 13, output = "out" }
+params.size = 0.12
+params.text = "DRAFT"
+
+[[node]]
+id = 15
+name = "main_out"
+type = "cmp.window"
+pos = [2200.0, 0.0]
+inputs.in = { node = 14, output = "out" }

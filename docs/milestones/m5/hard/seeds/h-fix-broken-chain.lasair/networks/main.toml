@@ -1,0 +1,58 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "base_noise"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.z = { value = 0.0, expr = "time * 0.3" }
+
+[[node]]
+id = 1
+name = "blur_soft"
+type = "img.blur"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.size = 12.0
+
+[[node]]
+id = 2
+name = "wobble"
+type = "sig.lfo"
+pos = [0.0, 140.0]
+params.frequency = 0.3
+
+[[node]]
+id = 3
+name = "shake"
+type = "img.transform"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.rotate = { value = 0.0, expr = "20 * op('lfo_main')['lfo']" }
+
+[[node]]
+id = 4
+name = "res_fix"
+type = "img.resolution"
+pos = [440.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.height = 90
+params.mode = "pixels"
+params.width = 160
+
+[[node]]
+id = 5
+name = "glow"
+type = "img.bloom"
+pos = [660.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.threshold = 0.7
+
+[[node]]
+id = 6
+name = "main_out"
+type = "cmp.window"
+pos = [880.0, 0.0]
+inputs.in = { node = 5, output = "out" }

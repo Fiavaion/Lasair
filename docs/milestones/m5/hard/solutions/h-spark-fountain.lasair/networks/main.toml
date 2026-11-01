@@ -1,0 +1,33 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "sparks"
+type = "pnt.particles"
+pos = [0.0, 0.0]
+inputs.prev = { node = 0, output = "out" }
+params.capacity = 100000
+params.gravity = [0.0, -1.2, 0.0]
+params.life = 2.0
+params.radius = 0.1
+params.rate = 3000.0
+params.velocity = [0.0, 1.5, 0.0]
+
+[[node]]
+id = 1
+name = "dots"
+type = "img.render_points"
+pos = [220.0, 0.0]
+inputs.geo = { node = 0, output = "out" }
+params.blend = "add"
+params.size = 3.0
+
+[[node]]
+id = 2
+name = "glow"
+type = "img.bloom"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.threshold = 0.4

@@ -261,9 +261,17 @@ mod tests {
             worst * 1e3
         );
         // A burst per frame would put the mean far off; 1% on real hardware,
-        // 5% on a shared runner.
-        let tol = if strict() { 0.01 } else { 0.05 };
-        assert!((span - nominal).abs() / nominal < tol, "{span}");
+        // 5% on a shared runner, where one starved wake-up (59 ms seen on a
+        // macOS runner) stretches the mean: there the median spacing, which a
+        // burst per frame would pull towards zero, is what is checked.
+        if strict() {
+            assert!((span - nominal).abs() / nominal < 0.01, "{span}");
+        } else {
+            let mut gaps: Vec<f64> = t.windows(2).map(|w| (w[1] - w[0]).as_secs_f64()).collect();
+            gaps.sort_by(f64::total_cmp);
+            let median = gaps[gaps.len() / 2];
+            assert!((median - nominal).abs() / nominal < 0.05, "median {median}");
+        }
         // A busy machine (a shared CI runner) can delay one wake-up by several
         // ms; a burst per frame would be 16 ms or more off every time, which
         // the average above catches. The worst single interval is checked on

@@ -1,0 +1,63 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "noise1"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.octaves = 4
+params.scale = 3.0
+params.z = { value = 0.0, expr = "time*0.4" }
+
+[[node]]
+id = 1
+name = "soft"
+type = "img.blur"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.size = 6.0
+
+[[node]]
+id = 2
+name = "fb"
+type = "img.feedback"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+inputs.loop = { node = 5, output = "out" }
+
+[[node]]
+id = 3
+name = "smear"
+type = "img.transform"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.scale = [1.005, 1.005]
+params.translate = [0.004, 0.0]
+
+[[node]]
+id = 4
+name = "smearblur"
+type = "img.blur"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.size = 3.0
+
+[[node]]
+id = 5
+name = "mix"
+type = "img.blend"
+pos = [1100.0, 0.0]
+inputs.a = { node = 1, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.mix = 0.6
+
+[[node]]
+id = 6
+name = "flicker"
+type = "img.level"
+pos = [0.0, 160.0]
+inputs.in = { node = 5, output = "out" }
+params.brightness = { value = 1.0, expr = "0.85 + 0.6*clamp(sin(time*3.1)*sin(time*7.3)*4-2.2,0,1) + 0.05*sin(time*50)" }
+params.contrast = 1.2

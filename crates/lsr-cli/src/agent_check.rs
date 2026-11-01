@@ -26,7 +26,12 @@
 //!   some node of that type has `param` (any parameter when omitted) driven:
 //!   with `contains`, by an expression whose text contains it; with `bind =
 //!   true`, by a channel binding; with neither, by either. `from` also
-//!   requires the bound SIG node's type to start with it.
+//!   requires the bound SIG node's type to start with it. `range = [lo,
+//!   hi]`: the parameter is bound to a channel that swings between those
+//!   values (within 5%): an LFO's offset ∓ amplitude, or a Math node's
+//!   `to_min`..`to_max`. `period = s`: what drives it repeats every `s`
+//!   seconds: a bound Timer's `length` or LFO's 1 / `frequency`, or an
+//!   expression that names `s` (`time % 12`).
 //! - `count`: one point per entry, `{type, min?, max?}`: the number of nodes
 //!   of that type prefix lies in the range.
 //! - `seed`: a project directory the run starts from (a copy), for debug and
@@ -35,6 +40,10 @@
 //! - Always one point: every node cooks without an error.
 //!
 //! A model error ends the run with one extra point missed.
+//!
+//! Every type prefix above (in `require`, a path step, `type`, `from`) may
+//! list alternatives with `|`: `"pnt.noise|pnt.turbulence"` matches either,
+//! for prompts a model can rightly answer more than one way.
 
 use std::path::{Path, PathBuf};
 
@@ -115,6 +124,10 @@ pub(crate) struct ExprCheck {
     pub bind: bool,
     #[serde(default)]
     pub from: Option<String>,
+    #[serde(default)]
+    pub range: Option<[f64; 2]>,
+    #[serde(default)]
+    pub period: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +178,7 @@ impl Prompt {
                 v.why.push(why);
             }
         };
-        let starts = |n: &Node, p: &str| n.type_id.starts_with(p);
+        let starts = |n: &Node, p: &str| type_matches(&n.type_id, p);
 
         check(
             net.len() >= self.min_nodes,
@@ -192,7 +205,7 @@ impl Prompt {
             check(
                 net.nodes()
                     .filter(|n| starts(n, &c.type_id))
-                    .any(|n| expr_ok(net, n, c)),
+                    .any(|n| expr_ok(net, registry, n, c)),
                 format!("{} {} not driven as asked", c.type_id, c.describe()),
             );
         }
@@ -266,8 +279,19 @@ impl ExprCheck {
         if let Some(f) = &self.from {
             s += &format!(" from {f}");
         }
+        if let Some([lo, hi]) = self.range {
+            s += &format!(" over {lo}..{hi}");
+        }
+        if let Some(t) = self.period {
+            s += &format!(" every {t} s");
+        }
         s
     }
+}
+
+/// `t` starts with `pat`, or with one of its `|` alternatives.
+fn type_matches(t: &str, pat: &str) -> bool {
+    pat.split('|').any(|p| t.starts_with(p.trim()))
 }
 
 /// A path through the wires visiting nodes of each prefix in order.
@@ -275,7 +299,7 @@ fn path_exists(net: &Network, path: &str) -> bool {
     let steps: Vec<&str> = path.split('>').map(str::trim).collect();
     let matches = |id: NodeId, k: usize| {
         net.node(id)
-            .is_some_and(|n| n.type_id.starts_with(steps[k]))
+            .is_some_and(|n| type_matches(&n.type_id, steps[k]))
     };
     // State (node, k): k steps matched, the last at `node` or upstream of it.
     let mut seen = std::collections::BTreeSet::new();
@@ -359,26 +383,88 @@ fn param_ok(net: &Network, registry: &Registry, n: &Node, c: &ParamCheck) -> boo
     true
 }
 
-fn driven_ok(net: &Network, p: &Param, c: &ExprCheck) -> bool {
+fn driven_ok(net: &Network, registry: &Registry, p: &Param, c: &ExprCheck) -> bool {
+    let source = p.bind.as_ref().and_then(|b| net.node(b.node));
     let bound = || {
-        p.bind.as_ref().is_some_and(|b| {
-            c.from.as_ref().is_none_or(|f| {
-                net.node(b.node)
-                    .is_some_and(|src| src.type_id.starts_with(f.as_str()))
-            })
+        source.is_some_and(|src| {
+            c.from
+                .as_ref()
+                .is_none_or(|f| type_matches(&src.type_id, f))
         })
     };
-    match (&c.contains, c.bind) {
+    let ok = match (&c.contains, c.bind) {
         (Some(s), _) => p.expr.as_ref().is_some_and(|e| e.contains(s.as_str())),
         (None, true) => bound(),
         (None, false) => p.expr.is_some() || bound(),
-    }
+    };
+    let num = |n: &Node, name: &str| {
+        net.param_value(registry, n.id, name)
+            .and_then(Value::as_f64)
+    };
+    let close = |a: f64, b: f64| (a - b).abs() <= 0.05 * b.abs().max(1e-3);
+    let in_range = c.range.is_none_or(|[lo, hi]| {
+        source.is_some_and(|src| {
+            let swing = if src.type_id.starts_with("sig.lfo") {
+                num(src, "offset")
+                    .zip(num(src, "amplitude"))
+                    .map(|(o, a)| (o - a.abs(), o + a.abs()))
+            } else if src.type_id.starts_with("sig.math") {
+                num(src, "to_min").zip(num(src, "to_max"))
+            } else {
+                None
+            };
+            swing.is_some_and(|(a, b)| close(a.min(b), lo) && close(a.max(b), hi))
+        })
+    });
+    // The channel and every SIG node upstream of it (a Math remap fed by
+    // a Timer repeats with the Timer).
+    let upstream = |src: &Node| {
+        let mut seen = vec![src.id];
+        let mut k = 0;
+        while k < seen.len() {
+            let id = seen[k];
+            for w in net.wires().filter(|w| w.to.node == id) {
+                if !seen.contains(&w.from.node)
+                    && net
+                        .node(w.from.node)
+                        .is_some_and(|n| n.type_id.starts_with("sig."))
+                {
+                    seen.push(w.from.node);
+                }
+            }
+            k += 1;
+        }
+        seen
+    };
+    let repeats = c.period.is_none_or(|t| match source {
+        Some(src) => upstream(src)
+            .into_iter()
+            .filter_map(|id| net.node(id))
+            .any(|n| {
+                if n.type_id.starts_with("sig.timer") {
+                    num(n, "length").is_some_and(|l| close(l, t))
+                } else if n.type_id.starts_with("sig.lfo") {
+                    num(n, "frequency").is_some_and(|f| f > 0.0 && close(1.0 / f, t))
+                } else {
+                    false
+                }
+            }),
+        None => p.expr.as_ref().is_some_and(|e| {
+            let t = format!("{t}");
+            e.split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+                .any(|w| w == t || w.trim_end_matches(".0") == t)
+        }),
+    });
+    ok && in_range && repeats
 }
 
-fn expr_ok(net: &Network, n: &Node, c: &ExprCheck) -> bool {
+fn expr_ok(net: &Network, registry: &Registry, n: &Node, c: &ExprCheck) -> bool {
     match &c.param {
-        Some(name) => n.params.get(name).is_some_and(|p| driven_ok(net, p, c)),
-        None => n.params.values().any(|p| driven_ok(net, p, c)),
+        Some(name) => n
+            .params
+            .get(name)
+            .is_some_and(|p| driven_ok(net, registry, p, c)),
+        None => n.params.values().any(|p| driven_ok(net, registry, p, c)),
     }
 }
 
@@ -484,6 +570,30 @@ mod tests {
                 failures.push(format!("{}: {}/{} {:?}", p.id, v.points, v.max, v.why));
             }
         }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Networks models built that answer the prompt another right way (an
+    /// LFO's own offset and amplitude instead of a Math remap, a time
+    /// expression instead of a Timer, ...): `<id>--<model>.lasair`.
+    #[test]
+    fn right_answers_the_models_found_score_full_points() {
+        let dir = root().join("docs/milestones/m5/hard/alternatives");
+        let ps = prompts();
+        let mut seen = 0;
+        let mut failures = Vec::new();
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let path = e.unwrap().path();
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let id = name.split("--").next().unwrap();
+            let p = ps.iter().find(|p| p.id == id).expect(id);
+            let (v, _) = score(p, &path);
+            seen += 1;
+            if !v.valid() {
+                failures.push(format!("{name}: {}/{} {:?}", v.points, v.max, v.why));
+            }
+        }
+        assert!(seen >= 4);
         assert!(failures.is_empty(), "{failures:#?}");
     }
 

@@ -1,0 +1,82 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 9
+
+[[node]]
+id = 0
+name = "torus"
+type = "msh.torus"
+pos = [0.0, 0.0]
+params.columns = 48
+params.radius = 0.8
+params.rows = 24
+params.thickness = 0.3
+
+[[node]]
+id = 1
+name = "scatter"
+type = "msh.scatter"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.count = 5000
+
+[[node]]
+id = 2
+name = "solver"
+type = "pnt.solver"
+pos = [440.0, 0.0]
+inputs.init = { node = 1, output = "out" }
+inputs.prev = { node = 5, output = "out" }
+
+[[node]]
+id = 3
+name = "turb"
+type = "pnt.turbulence"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.amplitude = 0.6
+params.evolution = { value = 0.0, expr = "time*0.3" }
+params.frequency = 1.5
+
+[[node]]
+id = 4
+name = "drag"
+type = "pnt.drag"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+
+[[node]]
+id = 5
+name = "integrate"
+type = "pnt.integrate"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+
+[[node]]
+id = 6
+name = "colour"
+type = "pnt.colour"
+pos = [0.0, 160.0]
+inputs.in = { node = 5, output = "out" }
+params.high = 0.5
+params.low = -0.5
+params.ramp = "rainbow"
+
+[[node]]
+id = 7
+name = "sprite"
+type = "mat.point_sprite"
+pos = [220.0, 160.0]
+params.size = 4
+params.size_mode = "pixels"
+
+[[node]]
+id = 8
+name = "render"
+type = "img.render"
+pos = [440.0, 160.0]
+inputs.geo = { node = 6, output = "out" }
+inputs.mat = { node = 7, output = "out" }
+params.azimuth = { value = 30.0, expr = "time*12" }
+params.distance = 4.5
+params.elevation = 25

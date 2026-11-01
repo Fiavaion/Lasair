@@ -76,8 +76,8 @@ count = [
 [[prompt]]
 id = "h-three-looks"
 text = """Set up three looks I can cycle through: slowly drifting clouds, a bold six-sided shape that spins, and a plain glow that fades from the centre. A switcher should move through them by itself in a 12 second loop, crossfading smoothly instead of cutting, and come back round to the clouds without a jump. Output it to a window."""
-require = ["img.noise", "img.shape", "img.ramp", "img.switch", "sig.timer", "cmp.window"]
-min_nodes = 7
+require = ["img.noise", "img.shape", "img.ramp", "img.switch", "cmp.window"]
+min_nodes = 5
 animated = true
 paths = [
   "img.noise > img.switch > cmp.window",
@@ -87,10 +87,9 @@ paths = [
 params = [
   { type = "img.shape", name = "sides", eq = 6 },
   { type = "img.switch", name = "blend", eq = true },
-  { type = "sig.timer", name = "length", eq = 12 },
 ]
 exprs = [
-  { type = "img.switch", param = "index", from = "sig." },
+  { type = "img.switch", param = "index", period = 12 },
   { type = "img.shape", param = "rotate" },
 ]
 count = [{ type = "img.switch", min = 1, max = 1 }]
@@ -100,16 +99,16 @@ count = [{ type = "img.switch", min = 1, max = 1 }]
 [[prompt]]
 id = "h-torus-dust"
 text = """Take a ring-shaped doughnut surface and sprinkle exactly 5000 points over it. Make the points swirl around with a flowing turbulence that keeps changing over time, colour them by how high they are, and draw them as small round dots seen by a camera that slowly orbits around the ring."""
-require = ["msh.torus", "msh.scatter", "pnt.noise", "pnt.colour", "mat.point_sprite", "img.render"]
+require = ["msh.torus", "msh.scatter", "pnt.noise|pnt.turbulence", "pnt.colour", "mat.point_sprite", "img.render"]
 min_nodes = 6
 animated = true
 paths = [
-  "msh.torus > msh.scatter > pnt.noise > pnt.colour > img.render",
+  "msh.torus > msh.scatter > pnt.noise|pnt.turbulence > pnt.colour > img.render",
   "mat.point_sprite > img.render",
 ]
 params = [{ type = "msh.scatter", name = "count", eq = 5000 }]
 exprs = [
-  { type = "pnt.noise", param = "evolution", contains = "time" },
+  { type = "pnt.noise|pnt.turbulence", param = "evolution", contains = "time" },
   { type = "img.render", param = "azimuth", contains = "time" },
 ]
 
@@ -152,17 +151,14 @@ count = [{ type = "img.render", min = 1, max = 1 }]
 [[prompt]]
 id = "h-breathing-clouds"
 text = """Make drifting clouds that breathe: the picture should swell to twice its size and shrink to half, one full breath every four seconds. Separately, let the colours wander slowly on their own, loosely and not in step with the breathing. Drive both with signal nodes feeding the picture controls, not with typed formulas."""
-require = ["img.noise", "img.transform", "img.hsv_adjust", "sig.lfo", "sig.math", "sig.noise"]
-min_nodes = 6
+require = ["img.noise", "img.transform", "img.hsv_adjust", "sig.lfo", "sig.noise"]
+min_nodes = 5
 animated = true
-paths = ["sig.lfo > sig.math"]
 params = [
   { type = "sig.lfo", name = "frequency", eq = 0.25 },
-  { type = "sig.math", name = "to_min", eq = 0.5 },
-  { type = "sig.math", name = "to_max", eq = 2 },
 ]
 exprs = [
-  { type = "img.transform", param = "scale", bind = true, from = "sig.math" },
+  { type = "img.transform", param = "scale", bind = true, from = "sig.lfo|sig.math", range = [0.5, 2] },
   { type = "img.hsv_adjust", param = "hue", bind = true, from = "sig.noise" },
 ]
 
@@ -191,9 +187,9 @@ text = """Make animated noise look like a worn-out video tape being played back:
 require = ["img.noise", "img.blur", "img.feedback", "img.level"]
 min_nodes = 5
 animated = true
-params = [{ type = "img.blur", name = "size", min = 6 }]
+params = [{ type = "img.blur", name = "size", min = 2 }]
 exprs = [{ type = "img.level", param = "brightness" }]
-paths = ["img.feedback > img.composite"]
+paths = ["img.feedback > img.composite|img.blend|img.mixer"]
 
 [[prompt]]
 id = "h-stark-poster"

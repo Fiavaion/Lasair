@@ -15,7 +15,7 @@ name = "hoop"
 type = "msh.torus"
 pos = [0.0, 140.0]
 params.radius = 1.0
-params.thickness = 0.1
+params.thickness = 0.05
 
 [[node]]
 id = 2

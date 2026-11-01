@@ -128,7 +128,7 @@ params = [
 
 [[prompt]]
 id = "h-orbit-cam"
-text = """Build a small 3D scene: a ball half a unit in radius, with a big ring around it (the ring one unit across to the middle of its tube, the tube a tenth of a unit thick). Give the ball a warm cartoon-shaded look and the ring a flat, unlit bright cyan. The camera should sit five units away, look down at the scene from 25 degrees up, and circle slowly around it all the time."""
+text = """Build a small 3D scene: a ball half a unit in radius, with a big ring around it (the middle of the ring's tube one unit out from the centre, the tube a tenth of a unit thick). Give the ball a warm cartoon-shaded look and the ring a flat, unlit bright cyan. The camera should sit five units away, look down at the scene from 25 degrees up, and circle slowly around it all the time."""
 require = ["msh.sphere", "msh.torus", "mat.toon", "mat.unlit", "img.render"]
 min_nodes = 5
 animated = true
@@ -141,7 +141,7 @@ paths = [
 params = [
   { type = "msh.sphere", name = "radius", eq = 0.5 },
   { type = "msh.torus", name = "radius", eq = 1 },
-  { type = "msh.torus", name = "thickness", eq = 0.1 },
+  { type = "msh.torus", name = "thickness", eq = 0.05 },
   { type = "img.render", name = "elevation", eq = 25 },
   { type = "img.render", name = "distance", eq = 5 },
 ]

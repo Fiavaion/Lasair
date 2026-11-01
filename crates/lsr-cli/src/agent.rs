@@ -38,6 +38,10 @@ pub enum AgentCommand {
         /// Only prompts whose id contains this.
         #[arg(long)]
         only: Option<String>,
+        /// Keep every network the model built, one project per prompt,
+        /// in this folder (replacing what is there).
+        #[arg(long)]
+        keep: Option<PathBuf>,
         #[command(flatten)]
         model: ModelArgs,
         /// Evaluate the Python expressions the model writes (they are code
@@ -114,12 +118,14 @@ pub fn run(cmd: AgentCommand) -> Result<()> {
             prompts,
             out,
             only,
+            keep,
             model,
             allow_python_ops,
         } => eval(
             &prompts,
             out.as_deref(),
             only.as_deref(),
+            keep.as_deref(),
             &model,
             allow_python_ops,
         ),
@@ -130,6 +136,7 @@ fn eval(
     path: &Path,
     out: Option<&Path>,
     only: Option<&str>,
+    keep: Option<&Path>,
     m: &ModelArgs,
     allow_python: bool,
 ) -> Result<()> {
@@ -155,7 +162,8 @@ fn eval(
             copy_dir(seed, &dir).with_context(|| format!("seed {}", seed.display()))?;
         }
         let t = Instant::now();
-        let mut ws = ServeWorkspace::open(&dir, false, allow_python)?;
+        // With --keep, every accepted change is written so the project can be read later.
+        let mut ws = ServeWorkspace::open(&dir, keep.is_some(), allow_python)?;
         let mut agent = Agent::new(scopes(), ShowLock::default());
         let run = assistant::build(llm.as_mut(), &mut agent, &mut ws, &p.text, m.max_steps);
         // Judge the network the model left, cooked afresh.
@@ -195,6 +203,10 @@ fn eval(
                 format!("{}/{} {}", verdict.points, verdict.max, why.join("; "))
             }
         );
+    }
+    if let Some(keep) = keep {
+        let _ = std::fs::remove_dir_all(keep);
+        copy_dir(&tmp, keep).with_context(|| keep.display().to_string())?;
     }
     let _ = std::fs::remove_dir_all(&tmp);
     let pct = 100.0 * valid as f64 / total.max(1) as f64;

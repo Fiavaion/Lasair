@@ -1048,6 +1048,12 @@ impl Agent {
     /// `build_network`: the nodes, then their parameters, then the wires,
     /// each through the single-step tools so the same checks apply; one
     /// failure does not stop the rest.
+    ///
+    /// With `"replace": true` (not offered to models in the tool schema;
+    /// planned mode sets it) the call states the WHOLE network: nodes it
+    /// omits are deleted, a node kept by name keeps its id and has exactly
+    /// the wires and channel bindings the call lists (a node of another
+    /// type under a kept name is replaced).
     fn build_network(
         &mut self,
         ws: &mut dyn Workspace,
@@ -1057,6 +1063,30 @@ impl Agent {
         let mut made = Vec::new();
         let mut errors = Vec::new();
         let args = |v: Value| v.as_object().cloned().unwrap_or_default();
+        let replace = a.get("replace").and_then(Value::as_bool) == Some(true);
+        let plan_nodes: Vec<&Value> = a
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .collect();
+        if replace {
+            let keep: Vec<(&str, &str)> = plan_nodes
+                .iter()
+                .filter_map(|n| Some((n["name"].as_str()?, n["type"].as_str()?)))
+                .collect();
+            let doomed: Vec<String> = self
+                .view(ws)
+                .nodes()
+                .filter(|n| !keep.contains(&(n.name.as_str(), n.type_id.as_str())))
+                .map(|n| n.name.clone())
+                .collect();
+            for name in doomed {
+                if let Err(e) = self.run(ws, "delete_node", &args(json!({"node": name}))) {
+                    errors.push(format!("node `{name}`: {e}"));
+                }
+            }
+        }
         for n in a
             .get("nodes")
             .and_then(Value::as_array)
@@ -1128,6 +1158,9 @@ impl Agent {
                 }
             }
         }
+        if replace {
+            self.drop_unplanned_inputs(ws, a, &mut errors);
+        }
         let mut wired = 0;
         for w in a
             .get("wires")
@@ -1191,6 +1224,75 @@ impl Agent {
         Ok(Output::Json(json!({
             "nodes": made, "wires": wired, "errors": errors, "staged": true, "next": next,
         })))
+    }
+}
+
+impl Agent {
+    /// `build_network` with `replace`: removes the wires into a planned
+    /// node, and the channel bindings on its parameters, that the plan does
+    /// not list (`to` + `input`, a binding being a wire to a parameter name).
+    fn drop_unplanned_inputs(
+        &mut self,
+        ws: &mut dyn Workspace,
+        a: &Map<String, Value>,
+        errors: &mut Vec<String>,
+    ) {
+        let planned: Vec<(&str, &str)> = a
+            .get("wires")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|w| Some((w["to"].as_str()?, w["input"].as_str()?)))
+            .collect();
+        let names: Vec<&str> = a
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|n| n["name"].as_str())
+            .collect();
+        for name in names {
+            let view = self.view(ws);
+            let Some(node) = view.node_by_name(name) else {
+                continue;
+            };
+            let id = node.id;
+            let stale_wires: Vec<String> = view
+                .inputs_of(id)
+                .map(|(input, _)| input.to_owned())
+                .filter(|input| !planned.contains(&(name, input.as_str())))
+                .collect();
+            let stale_binds: Vec<(String, Param)> = node
+                .params
+                .iter()
+                .filter(|(k, p)| p.bind.is_some() && !planned.contains(&(name, k.as_str())))
+                .map(|(k, p)| {
+                    let mut unbound = p.clone();
+                    unbound.bind = None;
+                    (k.clone(), unbound)
+                })
+                .collect();
+            for input in stale_wires {
+                if let Err(e) = self.run(
+                    ws,
+                    "disconnect",
+                    &json!({"to": name, "input": input}).as_object().cloned().unwrap_or_default(),
+                ) {
+                    errors.push(format!("unwire {name}.{input}: {e}"));
+                }
+            }
+            for (param, value) in stale_binds {
+                let net = self.view(ws).clone();
+                let edit = Edit::SetParam {
+                    node: id,
+                    param: param.clone(),
+                    value: Some(value),
+                };
+                if let Err(e) = self.stage(ws, net, vec![edit], format!("unbind {name}.{param}")) {
+                    errors.push(format!("unbind {name}.{param}: {e}"));
+                }
+            }
+        }
     }
 }
 

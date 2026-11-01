@@ -626,8 +626,18 @@ pub(crate) fn tools_system(
         return BARE_RULES.to_owned();
     }
     let examples = hits.map_or(String::new(), |h| examples_block(&h.examples, false));
+    // Bare has `get_network`; the others are shown the network they edit.
+    let base = ws.network();
+    let existing = if base.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nThe project already has this network (JSON, to read: parameters as name/value pairs, wires as node.output to node.input; build with the build_network format above):\n{}\nKeep every existing node under its exact name and type unless the request says to change it, and add or change only what the request needs.\n",
+            network_json(base)
+        )
+    };
     format!(
-        "{}{}{examples}",
+        "{}{}{existing}{examples}",
         system_prompt(ws),
         ops_for(ws, request, hits)
     )
@@ -705,6 +715,8 @@ fn build_planned(
         // anyway, so the network the model leaves is its best one.
         if full {
             let faults = validate_plan(&plan, ws.network(), ws.registry());
+            // A validated plan is a call, so refused / calls stays a ratio.
+            run.tool_calls += 1;
             if !faults.is_empty() && run.steps < limit {
                 run.tool_errors += faults.len() as u32;
                 if trace {
@@ -719,7 +731,10 @@ fn build_planned(
         }
         // Each round restages the whole plan on the network as accepted so far.
         agent.call(ws, "discard_changes", &json!({}));
-        let out = agent.call(ws, "build_network", &plan_to_network(&plan));
+        // The plan is the WHOLE network: what it omits is deleted.
+        let mut staged_plan = plan_to_network(&plan);
+        staged_plan["replace"] = json!(true);
+        let out = agent.call(ws, "build_network", &staged_plan);
         run.tool_calls += 1;
         let mut problems: Vec<String> = match &out {
             Output::Json(v) => v["errors"]
@@ -1691,5 +1706,160 @@ mod tests {
         assert!(t.contains(r#""params":{"scale":"2 + sin(time)"}"#), "{t}");
         // Standard text is a prefix of nothing here: no examples without hits.
         assert!(!plan_system(&ws, "a blurred noise", None).contains("Worked examples"));
+    }
+
+    /// The tool loop (Anthropic models, models without structured output)
+    /// is shown the network it edits at standard and full, not at bare, and
+    /// nothing of the kind for an empty workspace.
+    #[test]
+    fn the_tool_loop_shows_the_current_network_except_at_bare() {
+        let ws = seeded();
+        for level in [Assist::Standard, Assist::Full] {
+            let s = tools_system(&ws, "make the blur softer", level, None);
+            assert!(s.contains("already has this network"), "{s}");
+            assert!(s.contains(r#""name":"blur1""#), "{s}");
+            assert!(s.contains("2 + sin(time)"), "{s}");
+            assert!(s.contains(r#"{"from":"noise1.out","to":"blur1.in"}"#), "{s}");
+        }
+        let bare = tools_system(&ws, "make the blur softer", Assist::Bare, None);
+        assert_eq!(bare, BARE_RULES);
+        let empty = NetworkWorkspace::new(tiny_registry());
+        assert!(!tools_system(&empty, "x", Assist::Standard, None).contains("already has"));
+    }
+
+    fn plan_of(nodes: &[(&str, &str)], wires: &[(&str, &str)]) -> Value {
+        json!({
+            "nodes": nodes.iter().map(|(n, t)| json!({"name": n, "type": t, "params": []})).collect::<Vec<_>>(),
+            "wires": wires.iter().map(|(f, t)| json!({"from": f, "to": t})).collect::<Vec<_>>(),
+        })
+    }
+
+    /// Runs `plans` (one round each) over `ws` in planned mode.
+    fn plan_rounds(ws: &mut NetworkWorkspace, plans: Vec<Value>) -> Run {
+        let mut llm = FullLlm::new(plans, vec![]);
+        build_with(
+            &mut llm,
+            &mut accepting_agent(),
+            ws,
+            "change it",
+            1,
+            &mut Assistance::standard(),
+        )
+    }
+
+    /// A plan is the WHOLE network: a node it omits is deleted, a wire it
+    /// drops is removed, and kept nodes keep their ids.
+    #[test]
+    fn a_plan_round_replaces_the_network() {
+        // Omitted node.
+        let mut ws = seeded();
+        let noise = ws.network.node_by_name("noise1").unwrap().id;
+        plan_rounds(
+            &mut ws,
+            vec![plan_of(&[("noise1", "img.noise")], &[])],
+        );
+        assert!(ws.network.node_by_name("blur1").is_none(), "blur1 is gone");
+        assert_eq!(ws.network.node_by_name("noise1").unwrap().id, noise);
+        assert_eq!(ws.network.wires().count(), 0, "its wire went with it");
+        // Dropped wire, node kept.
+        let mut ws = seeded();
+        plan_rounds(
+            &mut ws,
+            vec![plan_of(&[("noise1", "img.noise"), ("blur1", "img.blur")], &[])],
+        );
+        assert_eq!(ws.network.len(), 2);
+        assert_eq!(ws.network.wires().count(), 0, "the dropped wire is gone");
+        // A wire kept stays.
+        let mut ws = seeded();
+        plan_rounds(
+            &mut ws,
+            vec![plan_of(
+                &[("noise1", "img.noise"), ("blur1", "img.blur")],
+                &[("noise1.out", "blur1.in")],
+            )],
+        );
+        assert_eq!(ws.network.wires().count(), 1);
+    }
+
+    #[test]
+    fn a_plan_round_drops_a_binding_it_does_not_list() {
+        let mut reg = lsr_core::Registry::default();
+        lsr_ops_img::register(&mut reg);
+        lsr_ops_sig::register(&mut reg);
+        let mut ws = NetworkWorkspace::new(reg);
+        let bound = json!({"nodes": [{"name": "lfo1", "type": "sig.lfo"}, {"name": "level1", "type": "img.level"}],
+            "wires": [{"from": "lfo1", "output": "out", "to": "level1", "input": "brightness"}]});
+        let mut agent = accepting_agent();
+        agent.call(&mut ws, "build_network", &bound);
+        agent.accept(&mut ws, "seed").unwrap();
+        assert!(ws.network.node_by_name("level1").unwrap().params["brightness"].bind.is_some());
+        plan_rounds(
+            &mut ws,
+            vec![plan_of(&[("lfo1", "sig.lfo"), ("level1", "img.level")], &[])],
+        );
+        let level = ws.network.node_by_name("level1").unwrap();
+        assert!(level.params.get("brightness").is_none_or(|p| p.bind.is_none()));
+    }
+
+    /// Round 2 renames a node: round 1's node is not left behind.
+    #[test]
+    fn a_second_round_that_renames_a_node_leaves_no_orphan() {
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut llm = FullLlm::new(
+            vec![
+                // Round 1: a wrong input name, so a second round follows.
+                plan_of(
+                    &[("noise1", "img.noise"), ("blur1", "img.blur")],
+                    &[("noise1.out", "blur1.image")],
+                ),
+                plan_of(
+                    &[("clouds", "img.noise"), ("soft", "img.blur")],
+                    &[("clouds.out", "soft.in")],
+                ),
+            ],
+            vec![],
+        );
+        let run = build_with(
+            &mut llm,
+            &mut accepting_agent(),
+            &mut ws,
+            "noise, blurred",
+            40,
+            &mut Assistance::standard(),
+        );
+        assert_eq!(run.steps, 2, "{run:?}");
+        let names: Vec<&str> = ws.network.nodes().map(|n| n.name.as_str()).collect();
+        assert_eq!(ws.network.len(), 2, "{names:?}");
+        assert!(ws.network.node_by_name("noise1").is_none());
+        assert!(ws.network.node_by_name("blur1").is_none());
+        assert_eq!(ws.network.wires().count(), 1);
+    }
+
+    /// Full counts each validated plan as a call, so refused / calls is a ratio.
+    #[test]
+    fn full_counts_a_validated_plan_as_a_call() {
+        let mut ws = NetworkWorkspace::new(tiny_registry());
+        let mut llm = FullLlm::new(
+            vec![
+                // Faults found before staging: a blur with nothing wired in.
+                plan_of(&[("blur1", "img.blur")], &[]),
+                plan_of(
+                    &[("noise1", "img.noise"), ("blur1", "img.blur")],
+                    &[("noise1.out", "blur1.in")],
+                ),
+            ],
+            vec![json!({"complete": true, "problems": []})],
+        );
+        let run = build_with(
+            &mut llm,
+            &mut accepting_agent(),
+            &mut ws,
+            "noise, blurred",
+            40,
+            &mut Assistance::new(Assist::Full),
+        );
+        assert!(run.tool_errors >= 1, "{run:?}");
+        assert!(run.tool_calls >= run.tool_errors.min(run.steps), "{run:?}");
+        assert_eq!(run.tool_calls, 3, "two validations and one staging: {run:?}");
     }
 }

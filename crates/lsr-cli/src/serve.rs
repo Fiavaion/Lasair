@@ -336,13 +336,18 @@ impl Workspace for ServeWorkspace {
     }
 
     fn files_changed(&mut self) -> Result<(), String> {
-        // New kernel operators: open the project again (saving first so
-        // nothing accepted is lost).
+        // New kernel operators: open the project again, and keep the
+        // project as accepted so far (in memory, so it holds with
+        // `--no-save` too; with saving, what was accepted is on disk too).
         if self.save {
             lsr_format::save(&self.dir, &self.loaded.project).map_err(|e| e.to_string())?;
         }
-        let fresh =
+        let accepted = self.loaded.project.clone();
+        let mut fresh =
             Self::open(&self.dir, self.save, self.allow_python).map_err(|e| format!("{e:#}"))?;
+        fresh.loaded.project = accepted;
+        let main = fresh.network().clone();
+        fresh.reload(main)?;
         let history = std::mem::take(&mut self.history);
         let agent_python = self.allow_agent_python;
         *self = fresh;
@@ -685,5 +690,33 @@ mod tests {
             json!(3.0)
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reopening for new kernel files keeps the accepted network in memory,
+    /// with saving (it is on disk) and without (`--no-save`, the eval's
+    /// default): the network must not change.
+    #[test]
+    fn reopening_for_new_files_keeps_the_accepted_network() {
+        let Ok(gpu) = lsr_gpu::GpuContext::headless() else {
+            return;
+        };
+        drop(gpu);
+        for save in [false, true] {
+            let dir = std::env::temp_dir()
+                .join(format!("lsr-serve-reopen-{save}-{}.lasair", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut ws = ServeWorkspace::open(&dir, save, false).unwrap();
+            let mut agent = Agent::new(
+                Scope::defaults().into_iter().chain([Scope::Accept]).collect(),
+                ShowLock::default(),
+            );
+            agent.call(&mut ws, "create_node", &json!({"type": "img.noise", "name": "n"}));
+            agent.call(&mut ws, "accept_changes", &json!({}));
+            assert!(ws.network().node_by_name("n").is_some());
+            ws.files_changed().unwrap();
+            assert!(ws.network().node_by_name("n").is_some(), "save = {save}");
+            assert_eq!(ws.history.len(), 1);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }

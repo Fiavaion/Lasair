@@ -115,6 +115,9 @@ impl Llm for Ollama {
             "messages": messages,
             "tools": tools,
             "stream": false,
+            // Thinking models (qwen3.6, gemma4) otherwise spend the whole
+            // reply budget thinking and answer with nothing.
+            "think": false,
             "options": {"temperature": 0.2, "num_ctx": 32768, "num_predict": 2048},
         });
         let r = post_json(&format!("{}/api/chat", self.base), &[], &body)?;
@@ -143,6 +146,7 @@ impl Llm for Ollama {
             "messages": messages,
             "format": schema,
             "stream": false,
+            "think": false,
             "options": {"temperature": 0.2, "num_ctx": 32768, "num_predict": 4096},
         });
         Some((|| {
@@ -1107,6 +1111,59 @@ mod tests {
     use super::*;
     use crate::lock::{Scope, ShowLock};
     use crate::workspace::NetworkWorkspace;
+
+    /// Both Ollama requests turn thinking off: a thinking model would spend
+    /// the reply budget thinking and answer with nothing.
+    #[test]
+    fn ollama_requests_turn_thinking_off() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for _ in 0..2 {
+                let (s, _) = listener.accept().unwrap();
+                let mut r = BufReader::new(s);
+                let mut len = 0;
+                loop {
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                bodies.push(serde_json::from_slice::<Value>(&body).unwrap());
+                let reply = r#"{"message":{"content":"{}","tool_calls":[]}}"#;
+                write!(
+                    r.get_mut(),
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+            bodies
+        });
+        let mut o = Ollama {
+            base: format!("http://127.0.0.1:{port}"),
+            model: "m".into(),
+        };
+        o.chat(&[json!({"role": "user", "content": "hi"})], &[])
+            .unwrap();
+        o.json(
+            &[json!({"role": "user", "content": "hi"})],
+            &json!({"type": "object"}),
+        )
+        .unwrap()
+        .unwrap();
+        for b in server.join().unwrap() {
+            assert_eq!(b["think"], false, "{b}");
+        }
+    }
 
     /// HTTPS gets as far as the TLS handshake and fails as an error: the
     /// agent carries a crypto provider (a bare ureq agent panics here).

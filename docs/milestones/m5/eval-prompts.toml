@@ -86,7 +86,7 @@ min_nodes = 3
 [[prompt]]
 id = "particles"
 text = "Make a simple particle system of points and render it to an image."
-require = ["pnt.", "img.render"]
+require = ["pnt.", "img.render|img.render_points"]
 min_nodes = 2
 
 [[prompt]]

@@ -12,8 +12,17 @@
 #              nodes of these type prefixes in this order (others may lie between)
 #   params     {type, name, eq | any_of | min | max | contains}: the stored value
 #              of a parameter (default if untouched) on some node of that type
-#   exprs      {type, param?, contains?, bind?, from?}: a parameter driven by an
-#              expression containing a substring, or by a channel binding
+#              (a type is an exact type id, or a family prefix when it ends in a
+#              dot; `a|b` lists alternatives)
+#   exprs      {type, param?, contains?, bind?, from?, time_ok?, range?, period?}:
+#              a parameter driven by an expression containing a substring, or by
+#              a channel binding; `from` names the SIG node type it reads
+#              (through a Math remap too); `time_ok` accepts a time expression
+#              or any SIG binding
+#   either     {label, any = [{params?, exprs?, paths?, count?}, ...]}: one point
+#              when some alternative holds in full (right answers built another way)
+#   wired      {type, title_contains, from}: a node (e.g. the Preview window)
+#              fed by a node of type `from`
 #   count      {type, min?, max?}: how many nodes of that type
 #   seed       a project directory the run starts from (edit and debug tasks)
 #   keep       node names that must survive the edit
@@ -36,42 +45,59 @@ min_nodes = 10
 max_nodes = 20
 animated = true
 paths = [
-  "img.noise > img.kaleidoscope > img.composite > img.hsv_adjust > img.bloom > cmp.window",
+  "img.noise > img.kaleidoscope > img.composite > cmp.window",
+  "img.noise > img.hsv_adjust > cmp.window",
+  "img.noise > img.bloom > cmp.window",
   "img.feedback > img.transform > img.composite > img.feedback",
+  "img.feedback > img.level|img.hsv_adjust > img.feedback",
 ]
 params = [
   { type = "img.noise", name = "octaves", eq = 4 },
   { type = "img.kaleidoscope", name = "segments", eq = 8 },
-  { type = "img.level", name = "brightness", max = 0.99 },
+  { type = "img.noise", name = "monochrome", eq = false },
 ]
+either = [{ label = "the trails fade (a Level brightness or an HSV Adjust value below 1)", any = [
+  { params = [{ type = "img.level", name = "brightness", max = 0.99 }] },
+  { params = [{ type = "img.hsv_adjust", name = "value", max = 0.99 }] },
+] }]
 exprs = [{ type = "img.hsv_adjust", param = "hue" }]
 count = [{ type = "cmp.window", min = 2, max = 2 }]
 
 [[prompt]]
 id = "h-layered-stage"
 text = """Make a stage backdrop from three layers. At the bottom a gradient that glows outwards from the centre. On top of it, a grid of pentagons, three across and three down, added onto the gradient so they light it up. Over both, large soft cloudy noise (just a few big blobs, slowly moving) that multiplies the whole thing so it darkens unevenly. Show it in one output window, and use no more nodes than you need."""
-require = ["img.ramp", "img.shape", "img.tile", "img.noise", "img.composite", "cmp.window"]
-min_nodes = 7
+require = ["img.ramp", "img.shape", "img.tile", "img.noise", "cmp.window"]
+min_nodes = 6
 max_nodes = 12
 animated = true
-paths = [
-  "img.shape > img.tile > img.composite > img.composite > cmp.window",
-  "img.ramp > img.composite > img.composite",
-  "img.noise > img.composite > cmp.window",
-]
 params = [
   { type = "img.ramp", name = "type", eq = "radial" },
   { type = "img.shape", name = "shape", eq = "polygon" },
   { type = "img.shape", name = "sides", eq = 5 },
   { type = "img.tile", name = "repeat", eq = [3, 3] },
-  { type = "img.composite", name = "operation", eq = "add" },
-  { type = "img.composite", name = "operation", eq = "multiply" },
   { type = "img.noise", name = "scale", max = 3 },
 ]
-count = [
-  { type = "img.composite", min = 2, max = 2 },
-  { type = "cmp.window", min = 1, max = 1 },
-]
+count = [{ type = "cmp.window", min = 1, max = 1 }]
+paths = ["img.shape > img.tile"]
+# Two composites (add, then multiply), or one Mixer deck doing both layerings.
+either = [{ label = "the three layers combined (two composites: add then multiply, or one mixer: add on layer 1, multiply on layer 2)", any = [
+  { count = [{ type = "img.composite", min = 2, max = 2 }], params = [
+      { type = "img.composite", name = "operation", eq = "add" },
+      { type = "img.composite", name = "operation", eq = "multiply" },
+    ], paths = [
+      "img.shape > img.tile > img.composite > img.composite > cmp.window",
+      "img.ramp > img.composite > img.composite",
+      "img.noise > img.composite > cmp.window",
+    ] },
+  { count = [{ type = "img.mixer", min = 1, max = 1 }], params = [
+      { type = "img.mixer", name = "blend1", eq = "add" },
+      { type = "img.mixer", name = "blend2", eq = "multiply" },
+    ], paths = [
+      "img.shape > img.tile > img.mixer > cmp.window",
+      "img.ramp > img.mixer",
+      "img.noise > img.mixer",
+    ] },
+] }]
 
 [[prompt]]
 id = "h-three-looks"
@@ -87,11 +113,13 @@ paths = [
 params = [
   { type = "img.shape", name = "sides", eq = 6 },
   { type = "img.switch", name = "blend", eq = true },
+  { type = "img.ramp", name = "type", eq = "radial" },
 ]
-exprs = [
-  { type = "img.switch", param = "index", period = 12 },
-  { type = "img.shape", param = "rotate" },
-]
+exprs = [{ type = "img.switch", param = "index", period = 12 }]
+either = [{ label = "the shape spins (Shape rotate, or a Transform rotate on its chain)", any = [
+  { exprs = [{ type = "img.shape", param = "rotate" }] },
+  { paths = ["img.shape > img.transform > img.switch"], exprs = [{ type = "img.transform", param = "rotate" }] },
+] }]
 count = [{ type = "img.switch", min = 1, max = 1 }]
 
 # ---- Cross-family chains ----------------------------------------------------
@@ -103,13 +131,18 @@ require = ["msh.torus", "msh.scatter", "pnt.noise|pnt.turbulence", "pnt.colour",
 min_nodes = 6
 animated = true
 paths = [
-  "msh.torus > msh.scatter > pnt.noise|pnt.turbulence > pnt.colour > img.render",
+  "msh.torus > msh.scatter > pnt.noise|pnt.turbulence > img.render",
+  "msh.scatter > pnt.colour > img.render",
   "mat.point_sprite > img.render",
 ]
-params = [{ type = "msh.scatter", name = "count", eq = 5000 }]
+params = [
+  { type = "msh.scatter", name = "count", eq = 5000 },
+  { type = "pnt.colour", name = "attribute", eq = "P" },
+  { type = "pnt.colour", name = "measure", eq = "y" },
+]
 exprs = [
-  { type = "pnt.noise|pnt.turbulence", param = "evolution", contains = "time" },
-  { type = "img.render", param = "azimuth", contains = "time" },
+  { type = "pnt.noise|pnt.turbulence", param = "evolution", time_ok = true },
+  { type = "img.render", param = "azimuth", time_ok = true },
 ]
 
 [[prompt]]
@@ -123,6 +156,8 @@ params = [
   { type = "pnt.particles", name = "rate", min = 2700, max = 3300 },
   { type = "pnt.particles", name = "radius", max = 0.3 },
   { type = "pnt.particles", name = "emitter", eq = "sphere" },
+  { type = "pnt.particles", name = "velocity", component = 1, min = 0.1 },
+  { type = "pnt.particles", name = "gravity", component = 1, max = -0.1 },
   { type = "img.render_points", name = "blend", eq = "add" },
 ]
 
@@ -145,7 +180,7 @@ params = [
   { type = "img.render", name = "elevation", eq = 25 },
   { type = "img.render", name = "distance", eq = 5 },
 ]
-exprs = [{ type = "img.render", param = "azimuth", contains = "time" }]
+exprs = [{ type = "img.render", param = "azimuth", time_ok = true }]
 count = [{ type = "img.render", min = 1, max = 1 }]
 
 [[prompt]]
@@ -154,11 +189,8 @@ text = """Make drifting clouds that breathe: the picture should swell to twice i
 require = ["img.noise", "img.transform", "img.hsv_adjust", "sig.lfo", "sig.noise"]
 min_nodes = 5
 animated = true
-params = [
-  { type = "sig.lfo", name = "frequency", eq = 0.25 },
-]
 exprs = [
-  { type = "img.transform", param = "scale", bind = true, from = "sig.lfo|sig.math", range = [0.5, 2] },
+  { type = "img.transform", param = "scale", bind = true, from = "sig.lfo", range = [0.5, 2], period = 4 },
   { type = "img.hsv_adjust", param = "hue", bind = true, from = "sig.noise" },
 ]
 
@@ -172,11 +204,15 @@ params = [
   { type = "dat.table", name = "rows", contains = "0.6" },
   { type = "dat.table", name = "rows", contains = "45" },
   { type = "dat.table", name = "rows", contains = "full" },
+  { type = "dat.table", name = "rows", contains = "dim" },
+  { type = "dat.table", name = "rows", contains = "mid" },
+  { type = "dat.table", name = "rows", contains = "0.2" },
+  { type = "dat.table", name = "rows", contains = "15" },
 ]
 exprs = [
-  { type = "img.level", param = "brightness", contains = "op(" },
-  { type = "img.transform", param = "rotate", contains = "op(" },
-  { type = "img.noise", param = "z", contains = "time" },
+  { type = "img.level", param = "brightness", contains = "mid", from = "dat.table" },
+  { type = "img.transform", param = "rotate", contains = "mid", from = "dat.table" },
+  { type = "img.noise", param = "z", time_ok = true },
 ]
 
 # ---- Ambiguity: the look decides the structure ------------------------------
@@ -184,11 +220,14 @@ exprs = [
 [[prompt]]
 id = "h-worn-tape"
 text = """Make animated noise look like a worn-out video tape being played back: the picture is soft and smeared, leaves ghosts of where it just was, and flickers in brightness now and then."""
-require = ["img.noise", "img.blur", "img.feedback", "img.level"]
+require = ["img.noise", "img.blur", "img.feedback"]
 min_nodes = 5
 animated = true
 params = [{ type = "img.blur", name = "size", min = 2 }]
-exprs = [{ type = "img.level", param = "brightness" }]
+either = [{ label = "the brightness flickers (a Level brightness or an HSV Adjust value is driven)", any = [
+  { exprs = [{ type = "img.level", param = "brightness" }] },
+  { exprs = [{ type = "img.hsv_adjust", param = "value" }] },
+] }]
 paths = ["img.feedback > img.composite|img.blend|img.mixer"]
 
 [[prompt]]
@@ -198,8 +237,9 @@ require = ["img.noise", "img.threshold", "img.ramp", "img.lookup", "img.mirror"]
 min_nodes = 5
 animated = true
 paths = [
-  "img.noise > img.threshold > img.lookup > img.mirror",
+  "img.noise > img.threshold > img.lookup",
   "img.ramp > img.lookup",
+  "img.noise > img.mirror",
 ]
 params = [
   { type = "img.threshold", name = "softness", max = 0.05 },
@@ -212,15 +252,27 @@ params = [
 id = "h-fix-broken-chain"
 text = """My patch is broken. The picture comes out tiny and blocky, something is throwing errors, and the blur I added does nothing. Please fix it so it ends up sharp at full HD (1920 by 1080), the blur really is in the chain, and nothing reports errors. Keep the nodes I named (base_noise, blur_soft, wobble, glow, main_out); fix, don't rebuild."""
 seed = "docs/milestones/m5/hard/seeds/h-fix-broken-chain.lasair"
-keep = ["base_noise", "blur_soft", "wobble", "shake", "glow", "main_out"]
+keep = ["base_noise", "blur_soft", "wobble", "glow", "main_out"]
 min_nodes = 7
 max_nodes = 9
-paths = ["img.noise > img.blur > img.transform > img.resolution > img.bloom > cmp.window"]
-params = [
-  { type = "img.resolution", name = "mode", eq = "pixels" },
-  { type = "img.resolution", name = "width", eq = 1920 },
-  { type = "img.resolution", name = "height", eq = 1080 },
+paths = [
+  "img.noise > img.blur > cmp.window",
+  "img.noise > img.transform > cmp.window",
+  "img.noise > img.resolution > cmp.window",
+  "img.noise > img.bloom > cmp.window",
 ]
+# Full HD: 1920 by 1080 pixels, or 1.5 times the 1280 by 720 project.
+either = [{ label = "full HD (pixels 1920 x 1080, or fraction 1.5 of the 1280 x 720 project)", any = [
+  { params = [
+      { type = "img.resolution", name = "mode", eq = "pixels" },
+      { type = "img.resolution", name = "width", eq = 1920 },
+      { type = "img.resolution", name = "height", eq = 1080 },
+    ] },
+  { params = [
+      { type = "img.resolution", name = "mode", eq = "fraction" },
+      { type = "img.resolution", name = "fraction", eq = 1.5 },
+    ] },
+] }]
 exprs = [{ type = "img.transform", param = "rotate" }]
 
 [[prompt]]
@@ -252,8 +304,10 @@ min_nodes = 6
 max_nodes = 8
 animated = true
 paths = [
-  "img.feedback > img.transform > img.level > img.composite > img.feedback",
-  "img.noise > img.composite > cmp.window",
+  "img.feedback > img.transform > img.composite > img.feedback",
+  "img.feedback > img.level > img.composite > img.feedback",
+  "img.noise > cmp.window",
+  "img.composite > cmp.window",
 ]
 params = [
   { type = "img.composite", name = "operation", any_of = ["add", "screen", "maximum"] },
@@ -276,9 +330,16 @@ params = [
   { type = "img.kaleidoscope", name = "segments", eq = 12 },
   { type = "img.text", name = "text", eq = "FINAL" },
   { type = "cmp.window", name = "title", eq = "Preview" },
-  { type = "cmp.window", name = "width", eq = 480 },
-  { type = "cmp.window", name = "height", eq = 270 },
 ]
+either = [{ label = "the Preview window is 480 x 270 (width and height, or window_size)", any = [
+  { params = [
+      { type = "cmp.window", name = "width", eq = 480 },
+      { type = "cmp.window", name = "height", eq = 270 },
+    ] },
+  { params = [{ type = "cmp.window", name = "window_size", eq = [480, 270] }] },
+] }]
+# It shows the same final picture: the text stage feeds it.
+wired = [{ type = "cmp.window", title_contains = "preview", from = "img.text" }]
 count = [
   { type = "cmp.window", min = 2, max = 2 },
   { type = "img.text", min = 1, max = 1 },

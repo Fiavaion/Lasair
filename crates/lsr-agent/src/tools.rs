@@ -1276,7 +1276,10 @@ impl Agent {
                 if let Err(e) = self.run(
                     ws,
                     "disconnect",
-                    &json!({"to": name, "input": input}).as_object().cloned().unwrap_or_default(),
+                    &json!({"to": name, "input": input})
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default(),
                 ) {
                     errors.push(format!("unwire {name}.{input}: {e}"));
                 }

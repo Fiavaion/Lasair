@@ -75,6 +75,16 @@ pub const DEFAULT_EMBED_MODEL: &str = "qwen3-embedding:0.6b";
 pub const FULL_ROUNDS: u32 = 7;
 /// Plan rounds the answer to a self-review may take.
 pub const REVIEW_ROUNDS: u32 = 3;
+/// The most model turns a request can take at `level` with `max_steps`:
+/// `full` may add the self-review's rounds to its plan rounds, so it can
+/// exceed `max_steps`.
+pub fn effective_max_turns(level: Assist, max_steps: u32) -> u32 {
+    match level {
+        Assist::Full => max_steps.max(max_steps.min(FULL_ROUNDS) + REVIEW_ROUNDS),
+        _ => max_steps,
+    }
+}
+
 /// Operators the semantic search adds, and worked examples it injects.
 const TOP_OPS: usize = 8;
 const TOP_EXAMPLES: usize = 2;
@@ -356,6 +366,8 @@ pub struct Retriever {
     examples: Vec<(Example, Vec<f32>)>,
     /// A query failed: say so once, then stay lexical.
     failed: bool,
+    /// Why (the embedder's error), once it has failed.
+    failure: Option<String>,
 }
 
 impl Retriever {
@@ -423,6 +435,7 @@ impl Retriever {
             ops: op_index,
             examples: example_index,
             failed: false,
+            failure: None,
         })
     }
 
@@ -441,6 +454,7 @@ impl Retriever {
             other => {
                 self.failed = true;
                 let why = other.err().unwrap_or_else(|| "no vector".into());
+                self.failure = Some(why.clone());
                 eprintln!(
                     "assist full: the embedding model is unavailable ({why}); using lexical retrieval"
                 );
@@ -499,6 +513,11 @@ impl fmt::Debug for Retriever {
 pub struct Assistance {
     pub level: Assist,
     pub retriever: Option<Retriever>,
+    /// Why retrieval is lexical although `full` was asked for (the index
+    /// could not be built).
+    pub unavailable: Option<String>,
+    /// The last [`Self::search`] fell back to lexical retrieval.
+    last_lexical: bool,
 }
 
 impl Assistance {
@@ -506,7 +525,38 @@ impl Assistance {
         Self {
             level,
             retriever: None,
+            unavailable: None,
+            last_lexical: false,
         }
+    }
+
+    /// `full` without semantic retrieval: `reason` (the embedder's error).
+    pub fn without_retriever(mut self, reason: String) -> Self {
+        self.unavailable = Some(reason);
+        self
+    }
+
+    /// Why retrieval is lexical now, or `None` while it is semantic (or
+    /// the level does not retrieve).
+    pub fn lexical_reason(&self) -> Option<String> {
+        if self.level != Assist::Full {
+            return None;
+        }
+        match &self.retriever {
+            Some(r) => r
+                .failure
+                .clone()
+                .map(|e| format!("embeddings unavailable: {e}")),
+            None => Some(format!(
+                "embeddings unavailable: {}",
+                self.unavailable.as_deref().unwrap_or("no index")
+            )),
+        }
+    }
+
+    /// The last search fell back to lexical retrieval (at `full`).
+    pub fn last_search_was_lexical(&self) -> bool {
+        self.last_lexical
     }
 
     pub fn standard() -> Self {
@@ -523,7 +573,9 @@ impl Assistance {
         if self.level != Assist::Full {
             return None;
         }
-        self.retriever.as_mut()?.search(request)
+        let hits = self.retriever.as_mut().and_then(|r| r.search(request));
+        self.last_lexical = hits.is_none();
+        hits
     }
 }
 
@@ -1150,6 +1202,40 @@ mod tests {
         assert!(r.search("blur").is_none());
         assert!(r.failed);
         assert!(r.search("blur").is_none());
+        // The assistance says so, and which search was lexical.
+        let mut a = Assistance::new(Assist::Full).with_retriever(
+            Retriever::build(
+                &tiny_registry(),
+                Vec::new(),
+                Box::new(WordEmbedder::new("fake")),
+                None,
+            )
+            .unwrap(),
+        );
+        assert!(a.search("blur").is_some());
+        assert!(a.lexical_reason().is_none() && !a.last_search_was_lexical());
+        a.retriever.as_mut().unwrap().embedder = Box::new(Down);
+        assert!(a.search("blur").is_none());
+        assert!(a.last_search_was_lexical());
+        assert!(
+            a.lexical_reason()
+                .unwrap()
+                .contains("embeddings unavailable")
+        );
+        let none = Assistance::new(Assist::Full).without_retriever("no model".into());
+        assert_eq!(
+            none.lexical_reason().unwrap(),
+            "embeddings unavailable: no model"
+        );
+        assert!(Assistance::standard().lexical_reason().is_none());
+    }
+
+    #[test]
+    fn full_can_take_more_turns_than_max_steps() {
+        assert_eq!(effective_max_turns(Assist::Full, 40), 40);
+        assert_eq!(effective_max_turns(Assist::Full, 5), 8);
+        assert_eq!(effective_max_turns(Assist::Full, 1), 4);
+        assert_eq!(effective_max_turns(Assist::Standard, 5), 5);
     }
 
     /// Eval seeds and reference solutions must never reach a prompt.

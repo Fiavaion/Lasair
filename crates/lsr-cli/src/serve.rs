@@ -702,15 +702,24 @@ mod tests {
         };
         drop(gpu);
         for save in [false, true] {
-            let dir = std::env::temp_dir()
-                .join(format!("lsr-serve-reopen-{save}-{}.lasair", std::process::id()));
+            let dir = std::env::temp_dir().join(format!(
+                "lsr-serve-reopen-{save}-{}.lasair",
+                std::process::id()
+            ));
             let _ = std::fs::remove_dir_all(&dir);
             let mut ws = ServeWorkspace::open(&dir, save, false).unwrap();
             let mut agent = Agent::new(
-                Scope::defaults().into_iter().chain([Scope::Accept]).collect(),
+                Scope::defaults()
+                    .into_iter()
+                    .chain([Scope::Accept])
+                    .collect(),
                 ShowLock::default(),
             );
-            agent.call(&mut ws, "create_node", &json!({"type": "img.noise", "name": "n"}));
+            agent.call(
+                &mut ws,
+                "create_node",
+                &json!({"type": "img.noise", "name": "n"}),
+            );
             agent.call(&mut ws, "accept_changes", &json!({}));
             assert!(ws.network().node_by_name("n").is_some());
             ws.files_changed().unwrap();

@@ -1719,7 +1719,10 @@ mod tests {
             assert!(s.contains("already has this network"), "{s}");
             assert!(s.contains(r#""name":"blur1""#), "{s}");
             assert!(s.contains("2 + sin(time)"), "{s}");
-            assert!(s.contains(r#"{"from":"noise1.out","to":"blur1.in"}"#), "{s}");
+            assert!(
+                s.contains(r#"{"from":"noise1.out","to":"blur1.in"}"#),
+                "{s}"
+            );
         }
         let bare = tools_system(&ws, "make the blur softer", Assist::Bare, None);
         assert_eq!(bare, BARE_RULES);
@@ -1754,10 +1757,7 @@ mod tests {
         // Omitted node.
         let mut ws = seeded();
         let noise = ws.network.node_by_name("noise1").unwrap().id;
-        plan_rounds(
-            &mut ws,
-            vec![plan_of(&[("noise1", "img.noise")], &[])],
-        );
+        plan_rounds(&mut ws, vec![plan_of(&[("noise1", "img.noise")], &[])]);
         assert!(ws.network.node_by_name("blur1").is_none(), "blur1 is gone");
         assert_eq!(ws.network.node_by_name("noise1").unwrap().id, noise);
         assert_eq!(ws.network.wires().count(), 0, "its wire went with it");
@@ -1765,7 +1765,10 @@ mod tests {
         let mut ws = seeded();
         plan_rounds(
             &mut ws,
-            vec![plan_of(&[("noise1", "img.noise"), ("blur1", "img.blur")], &[])],
+            vec![plan_of(
+                &[("noise1", "img.noise"), ("blur1", "img.blur")],
+                &[],
+            )],
         );
         assert_eq!(ws.network.len(), 2);
         assert_eq!(ws.network.wires().count(), 0, "the dropped wire is gone");
@@ -1792,13 +1795,25 @@ mod tests {
         let mut agent = accepting_agent();
         agent.call(&mut ws, "build_network", &bound);
         agent.accept(&mut ws, "seed").unwrap();
-        assert!(ws.network.node_by_name("level1").unwrap().params["brightness"].bind.is_some());
+        assert!(
+            ws.network.node_by_name("level1").unwrap().params["brightness"]
+                .bind
+                .is_some()
+        );
         plan_rounds(
             &mut ws,
-            vec![plan_of(&[("lfo1", "sig.lfo"), ("level1", "img.level")], &[])],
+            vec![plan_of(
+                &[("lfo1", "sig.lfo"), ("level1", "img.level")],
+                &[],
+            )],
         );
         let level = ws.network.node_by_name("level1").unwrap();
-        assert!(level.params.get("brightness").is_none_or(|p| p.bind.is_none()));
+        assert!(
+            level
+                .params
+                .get("brightness")
+                .is_none_or(|p| p.bind.is_none())
+        );
     }
 
     /// Round 2 renames a node: round 1's node is not left behind.
@@ -1860,6 +1875,9 @@ mod tests {
         );
         assert!(run.tool_errors >= 1, "{run:?}");
         assert!(run.tool_calls >= run.tool_errors.min(run.steps), "{run:?}");
-        assert_eq!(run.tool_calls, 3, "two validations and one staging: {run:?}");
+        assert_eq!(
+            run.tool_calls, 3,
+            "two validations and one staging: {run:?}"
+        );
     }
 }

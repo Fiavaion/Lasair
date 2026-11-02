@@ -195,6 +195,10 @@ pub(crate) struct ExprCheck {
     /// SIG node, or a binding to a SIG node.
     #[serde(default)]
     pub time_ok: bool,
+    /// The expression reads this row of a table it names: `op('t')['mid',
+    /// 1]`, or the row's index (`op('t')[2, 1]` when `mid` is row 2).
+    #[serde(default)]
+    pub row: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,7 +596,52 @@ fn op_refs(expr: &str) -> Vec<String> {
     out
 }
 
-/// `expr` has `t` as a modulus: `% 12`, `fmod(x, 12)`, or `/ 12` beside a `%`.
+/// `expr` reads row `want` of a table it names, by name or by index.
+fn reads_row(net: &Network, registry: &Registry, expr: &str, want: &str) -> bool {
+    let mut rest = expr;
+    while let Some(i) = rest.find("op(") {
+        rest = &rest[i + 3..];
+        let Some(name) = op_refs(&format!("op({rest}")).into_iter().next() else {
+            continue;
+        };
+        let Some(table) = net.node_by_name(&name).filter(|n| n.type_id == "dat.table") else {
+            continue;
+        };
+        // The first index after `op('name')`.
+        let after = &rest[rest.find(')').map_or(rest.len(), |k| k + 1)..];
+        let Some(idx) = after.trim_start().strip_prefix('[') else {
+            continue;
+        };
+        let token = idx
+            .split([',', ']'])
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .trim_matches(['\'', '"']);
+        if token == want {
+            return true;
+        }
+        let Ok(k) = token.parse::<usize>() else {
+            continue;
+        };
+        let text = |name: &str| {
+            net.param_value(registry, table.id, name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        // Parsed as the Table operator parses it.
+        let delim = Some(text("delimiter")).filter(|d| !d.is_empty());
+        let t = lsr_ops_dat::delim::parse(&text("rows"), delim.as_deref().unwrap_or("tab"));
+        if t.cell(k, 0).is_some_and(|c| c.trim() == want) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `expr` repeats every `t` seconds: `% 12`, `fmod(x, 12)`, or `/ 12` beside
+/// a `%`, `floor(` or `frac(` (`time/12 - floor(time/12)`).
 fn modulo_form(expr: &str, t: f64) -> bool {
     let e: String = expr.chars().filter(|c| !c.is_whitespace()).collect();
     let mut forms = vec![format!("{t}")];
@@ -610,7 +659,7 @@ fn modulo_form(expr: &str, t: f64) -> bool {
         e.match_indices(&format!("%{n}"))
             .any(|(i, _)| whole(i + 1, n))
             || (e.contains("fmod(") && e.match_indices(&format!(",{n})")).next().is_some())
-            || (e.contains('%')
+            || ((e.contains('%') || e.contains("floor(") || e.contains("frac("))
                 && e.match_indices(&format!("/{n}"))
                     .any(|(i, _)| whole(i + 1, n)))
     })
@@ -662,6 +711,9 @@ fn driven_ok(net: &Network, registry: &Registry, p: &Param, c: &ExprCheck) -> bo
             && c.from
                 .as_ref()
                 .is_none_or(|f| refs.iter().any(|n| type_matches(&n.type_id, f)))
+            && c.row
+                .as_ref()
+                .is_none_or(|r| reads_row(net, registry, e, r))
     });
     let bind_ok = c.contains.is_none()
         && source.is_some_and(|src| {
@@ -1308,6 +1360,10 @@ mod tests {
         expr(&mut n, "s", "index", "time % 12");
         assert!(ok(&n));
         expr(&mut n, "s", "index", "fmod(time, 12)");
+        assert!(modulo_form("3 * (time / 12 - floor(time / 12))", 12.0));
+        assert!(modulo_form("(time - 12 * floor(time / 12)) / 4", 12.0));
+        assert!(!modulo_form("floor(time / 120)", 12.0));
+        assert!(!modulo_form("sin(time / 12)", 12.0));
         assert!(ok(&n));
         expr(&mut n, "s", "index", "3 * (time % 12) / 12");
         assert!(ok(&n));
@@ -1754,6 +1810,21 @@ mod tests {
             !met(id, &n, "img.level brightness"),
             "a node that is not a table"
         );
+        // The row by its index (row 0 is the header): 2 is mid, 1 is dim.
+        set(
+            &mut n,
+            "cues",
+            "rows",
+            Param {
+                value: "name\tlevel\tspin\ndim\t0.2\t0\nmid\t0.6\t15\nfull\t1\t45".into(),
+                expr: None,
+                bind: None,
+            },
+        );
+        expr(&mut n, "lights", "brightness", "float(op('cues')[2, 1])");
+        assert!(met(id, &n, "img.level brightness"), "mid by index");
+        expr(&mut n, "lights", "brightness", "float(op('cues')[1, 1])");
+        assert!(!met(id, &n, "img.level brightness"), "dim by index");
         // The clouds move by time or by a signal.
         assert!(reasons(id, &n).iter().any(|w| w.contains("img.noise")));
         expr(&mut n, "clouds", "z", "time * 0.3");

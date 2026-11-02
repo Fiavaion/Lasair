@@ -210,8 +210,8 @@ params = [
   { type = "dat.table", name = "rows", contains = "15" },
 ]
 exprs = [
-  { type = "img.level", param = "brightness", contains = "mid", from = "dat.table" },
-  { type = "img.transform", param = "rotate", contains = "mid", from = "dat.table" },
+  { type = "img.level", param = "brightness", row = "mid", from = "dat.table" },
+  { type = "img.transform", param = "rotate", row = "mid", from = "dat.table" },
   { type = "img.noise", param = "z", time_ok = true },
 ]
 

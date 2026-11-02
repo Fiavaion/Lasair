@@ -1,0 +1,4 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "h-cue-sheet"
+resolution = [1280, 720]

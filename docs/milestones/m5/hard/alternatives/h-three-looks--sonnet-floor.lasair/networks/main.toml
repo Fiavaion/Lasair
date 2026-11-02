@@ -1,0 +1,52 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.octaves = 5
+params.roughness = 0.55
+params.scale = 3.0
+params.z = { value = 0.0, expr = "time * 0.05" }
+
+[[node]]
+id = 1
+name = "hex"
+type = "img.shape"
+pos = [220.0, 0.0]
+params.background = [0.0, 0.0, 0.05, 1.0]
+params.fill = [1.0, 0.35, 0.1, 1.0]
+params.rotate = { value = 0.0, expr = "time * 40" }
+params.shape = "polygon"
+params.size = [0.6, 0.6]
+
+[[node]]
+id = 2
+name = "glow"
+type = "img.ramp"
+pos = [440.0, 0.0]
+params.colour_a = [1.0, 0.9, 0.6, 1.0]
+params.colour_b = [0.0, 0.0, 0.0, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 3
+name = "switcher"
+type = "img.switch"
+pos = [660.0, 0.0]
+inputs.in0 = { node = 0, output = "out" }
+inputs.in1 = { node = 1, output = "out" }
+inputs.in2 = { node = 2, output = "out" }
+inputs.in3 = { node = 0, output = "out" }
+params.blend = true
+params.index = { value = 0.0, expr = "(time - 12 * floor(time / 12)) / 4" }
+
+[[node]]
+id = 4
+name = "out_window"
+type = "cmp.window"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }

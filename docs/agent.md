@@ -134,6 +134,23 @@ lasair agent eval --keep kept/ --out run.md                # keep every network 
 lasair agent judge --prompts <toml> --kept kept/ --report run.md --out rescored.md   # re-score kept networks, no model
 ```
 
+### OpenAI-compatible servers
+
+`--provider openai --base-url <api root>` runs the assistant against any OpenAI-compatible Chat
+Completions server (vLLM, SGLang, llama.cpp server, LM Studio), for example a DGX Spark on the
+Tailscale network (PRD A73). The key, if the server wants one, comes from `OPENAI_API_KEY` and is
+sent as `Authorization: Bearer`; it is never printed or written to a report. Requests go through
+the egress gate, which classes loopback, private, link-local and Tailscale (100.64.0.0/10)
+addresses as local or LAN, so Sovereign mode allows them without `--allow-internet`. Thinking is
+turned off (`chat_template_kwargs.enable_thinking: false`, and any `<think>` block is stripped),
+and the planned mode asks for `response_format: json_object`. The report header names the model
+as `openai:<model>`.
+
+```sh
+OPENAI_API_KEY=... lasair agent eval --provider openai --base-url http://100.81.126.89:8000/v1 \
+  --model <served-model-name> --assist standard --out spark.md
+```
+
 ### Assist levels
 
 `--assist bare|standard|full` (on `ask` and `eval`) sets how much help the model gets, so a local

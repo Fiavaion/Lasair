@@ -12,7 +12,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use lsr_agent::assist::{
     self, Assist, Assistance, DEFAULT_EMBED_MODEL, OllamaEmbedder, Retriever, effective_max_turns,
 };
-use lsr_agent::assistant::{self, Anthropic, Llm, Ollama};
+use lsr_agent::assistant::{self, Anthropic, Llm, Ollama, OpenAiCompat};
 use lsr_agent::lock::Scope;
 use lsr_agent::{Agent, ShowLock, Workspace};
 
@@ -79,10 +79,17 @@ pub enum AgentCommand {
 
 #[derive(Debug, clap::Args)]
 pub struct ModelArgs {
-    /// `ollama` (default, local) or `anthropic` (opt-in; ANTHROPIC_API_KEY,
+    /// `ollama` (default, local), `openai` (any OpenAI-compatible server:
+    /// vLLM, SGLang, llama.cpp, LM Studio; needs --base-url, key from
+    /// OPENAI_API_KEY if set) or `anthropic` (opt-in; ANTHROPIC_API_KEY,
     /// refused in Sovereign mode unless --allow-internet).
     #[arg(long, default_value = "ollama")]
     pub provider: String,
+    /// `--provider openai`: the server's API root, e.g.
+    /// `http://100.81.126.89:8000/v1`. LAN and Tailscale hosts pass the
+    /// egress gate in Sovereign mode.
+    #[arg(long)]
+    pub base_url: Option<String>,
     #[arg(long, default_value = "qwen2.5-coder:7b")]
     pub model: String,
     /// Model turns per request.
@@ -135,6 +142,16 @@ fn llm(m: &ModelArgs) -> Result<Box<dyn Llm>> {
         "ollama" => Box::new(Ollama::new(&m.model)),
         "anthropic" => Box::new(Anthropic {
             key: std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY is not set")?,
+            model: m.model.clone(),
+        }),
+        "openai" => Box::new(OpenAiCompat {
+            base_url: m
+                .base_url
+                .clone()
+                .context("--provider openai needs --base-url (e.g. http://host:8000/v1)")?,
+            key: std::env::var("OPENAI_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty()),
             model: m.model.clone(),
         }),
         other => bail!("unknown provider {other:?}"),

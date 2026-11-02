@@ -232,6 +232,156 @@ impl Llm for Anthropic {
     }
 }
 
+/// Any OpenAI-compatible Chat Completions server (vLLM, SGLang, llama.cpp
+/// server, LM Studio) at `base_url` (e.g. `http://100.81.126.89:8000/v1`).
+/// Reached through the egress gate like the other providers, so Sovereign
+/// mode allows loopback, LAN and Tailscale hosts and refuses the internet.
+#[derive(Clone)]
+pub struct OpenAiCompat {
+    pub base_url: String,
+    pub key: Option<String>,
+    pub model: String,
+}
+
+// Hand-written so the key can never reach a log or panic message.
+impl std::fmt::Debug for OpenAiCompat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiCompat")
+            .field("base_url", &self.base_url)
+            .field("key", &self.key.as_ref().map(|_| "…"))
+            .field("model", &self.model)
+            .finish()
+    }
+}
+
+impl OpenAiCompat {
+    /// The server's `host:port`, for reports (never the key).
+    pub fn host(&self) -> &str {
+        let rest = self
+            .base_url
+            .split_once("://")
+            .map_or(self.base_url.as_str(), |(_, r)| r);
+        rest.split('/').next().unwrap_or_default()
+    }
+
+    fn url(&self) -> String {
+        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+    }
+
+    fn bearer(&self) -> Option<String> {
+        self.key
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .map(|k| format!("Bearer {k}"))
+    }
+
+    fn chat_body(&self, messages: &[Value], tools: &[Value]) -> Value {
+        let mut body = json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 2048,
+            "stream": false,
+            // Thinking models otherwise spend the reply budget thinking.
+            "chat_template_kwargs": {"enable_thinking": false},
+        });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+        body
+    }
+
+    fn json_body(&self, messages: &[Value]) -> Value {
+        json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "stream": false,
+            "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": false},
+        })
+    }
+
+    fn post(&self, body: &Value) -> Result<Value, String> {
+        let auth = self.bearer();
+        let mut headers: Vec<(&str, &str)> = Vec::new();
+        if let Some(a) = &auth {
+            headers.push(("authorization", a));
+        }
+        let r = post_json(&self.url(), &headers, body)?;
+        if let Some(e) = r.get("error") {
+            return Err(format!("OpenAI-compatible server: {e}"));
+        }
+        Ok(r)
+    }
+}
+
+/// `text` without `<think>…</think>` blocks (and without a reasoning
+/// prefix whose opening tag the chat template swallowed).
+fn strip_think(text: &str) -> String {
+    let mut s = text.to_owned();
+    while let Some(a) = s.find("<think>") {
+        match s[a..].find("</think>") {
+            Some(e) => s.replace_range(a..a + e + "</think>".len(), ""),
+            None => {
+                s.truncate(a);
+                break;
+            }
+        }
+    }
+    if let Some(e) = s.find("</think>") {
+        s.replace_range(..e + "</think>".len(), "");
+    }
+    s.trim().to_owned()
+}
+
+/// `choices[0].message` in the shape the loop expects.
+fn openai_message(r: &Value) -> Value {
+    let m = &r["choices"][0]["message"];
+    let calls: Vec<Value> = m["tool_calls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let args = match c["function"]["arguments"].as_str() {
+                Some(t) => serde_json::from_str(t).unwrap_or(json!({})),
+                None => c["function"]["arguments"].clone(),
+            };
+            json!({"id": c["id"], "name": c["function"]["name"], "arguments": args})
+        })
+        .collect();
+    json!({"content": strip_think(m["content"].as_str().unwrap_or_default()), "tool_calls": calls})
+}
+
+impl Llm for OpenAiCompat {
+    fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Value, String> {
+        let r = self.post(&self.chat_body(messages, tools))?;
+        Ok(openai_message(&r))
+    }
+
+    fn name(&self) -> String {
+        format!("openai:{}", self.model)
+    }
+
+    fn json(&mut self, messages: &[Value], _schema: &Value) -> Option<Result<Value, String>> {
+        Some((|| {
+            let r = self.post(&self.json_body(messages))?;
+            let text = openai_message(&r)["content"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            serde_json::from_str(&text).map_err(|e| {
+                let tail = text.floor_char_boundary(text.len().saturating_sub(300));
+                format!(
+                    "OpenAI-compatible server: not JSON ({e}): …{}",
+                    &text[tail..]
+                )
+            })
+        })())
+    }
+}
+
 /// The system prompt: how to work, and the operator catalogue.
 pub fn system_prompt(ws: &dyn Workspace) -> String {
     let mut s = String::from(
@@ -1163,6 +1313,108 @@ mod tests {
         for b in server.join().unwrap() {
             assert_eq!(b["think"], false, "{b}");
         }
+    }
+
+    /// The OpenAI-compatible requests: tools, thinking off, JSON mode on
+    /// the plan call, the bearer header only when there is a key.
+    #[test]
+    fn openai_requests_and_replies() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let msgs = [json!({"role": "user", "content": "hi"})];
+        let tool = json!({"type": "function", "function": {"name": "t", "parameters": {}}});
+        let mut o = OpenAiCompat {
+            base_url: "http://h:8000/v1/".into(),
+            key: Some("sekret".into()),
+            model: "m".into(),
+        };
+        assert_eq!(o.url(), "http://h:8000/v1/chat/completions");
+        assert_eq!(o.host(), "h:8000");
+        assert_eq!(o.name(), "openai:m");
+        assert!(!format!("{o:?}").contains("sekret"));
+        assert_eq!(o.bearer().as_deref(), Some("Bearer sekret"));
+        let b = o.chat_body(&msgs, std::slice::from_ref(&tool));
+        assert_eq!(b["model"], "m");
+        assert_eq!(b["tools"][0], tool);
+        assert_eq!(b["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(b["max_tokens"], 2048);
+        assert!(b.get("response_format").is_none());
+        let j = o.json_body(&msgs);
+        assert_eq!(j["response_format"]["type"], "json_object");
+        assert_eq!(j["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(j["max_tokens"], 4096);
+        o.key = None;
+        assert_eq!(o.bearer(), None);
+
+        // Over the wire: the header is sent with a key and omitted without.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for _ in 0..2 {
+                let (s, _) = listener.accept().unwrap();
+                let mut r = BufReader::new(s);
+                let (mut len, mut auth, mut path) = (0, None, String::new());
+                loop {
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    if path.is_empty() {
+                        path = line.clone();
+                    }
+                    let l = line.to_ascii_lowercase();
+                    if let Some(v) = l.strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                    if l.starts_with("authorization:") {
+                        auth = Some(line.split_once(':').unwrap().1.trim().to_owned());
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                seen.push((path, auth));
+                let reply = r#"{"choices":[{"message":{"content":"ok"}}]}"#;
+                write!(
+                    r.get_mut(),
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+            seen
+        });
+        for key in [Some("k1".to_owned()), None] {
+            let mut o = OpenAiCompat {
+                base_url: format!("http://127.0.0.1:{port}/v1"),
+                key,
+                model: "m".into(),
+            };
+            assert_eq!(o.chat(&msgs, &[]).unwrap()["content"], "ok");
+        }
+        let seen = server.join().unwrap();
+        assert!(
+            seen[0].0.starts_with("POST /v1/chat/completions"),
+            "{seen:?}"
+        );
+        assert_eq!(seen[0].1.as_deref(), Some("Bearer k1"));
+        assert_eq!(seen[1].1, None);
+
+        // Replies: plain content, string-argument tool calls, think blocks.
+        let plain = openai_message(&json!({"choices": [{"message": {"content": "hello"}}]}));
+        assert_eq!(plain, json!({"content": "hello", "tool_calls": []}));
+        let calls = openai_message(&json!({"choices": [{"message": {
+            "content": null,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "build_network", "arguments": "{\"nodes\": [1]}"}}]}}]}));
+        assert_eq!(calls["content"], "");
+        assert_eq!(calls["tool_calls"][0]["id"], "c1");
+        assert_eq!(calls["tool_calls"][0]["name"], "build_network");
+        assert_eq!(calls["tool_calls"][0]["arguments"], json!({"nodes": [1]}));
+        let think = openai_message(&json!({"choices": [{"message": {
+            "content": "<think>\nhmm {}\n</think>\n{\"a\": 1}"}}]}));
+        assert_eq!(think["content"], "{\"a\": 1}");
+        assert_eq!(strip_think("reasoning</think>answer"), "answer");
     }
 
     /// HTTPS gets as far as the TLS handshake and fails as an error: the

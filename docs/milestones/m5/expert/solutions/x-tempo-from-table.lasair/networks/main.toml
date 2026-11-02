@@ -1,0 +1,44 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "setlist"
+type = "dat.table"
+pos = [0.0, 0.0]
+params.rows = '''
+name	bpm
+opener	128
+ballad	72
+finale	140'''
+
+[[node]]
+id = 1
+name = "clock"
+type = "sig.beat"
+pos = [220.0, 0.0]
+params.bpm = { value = 120.0, expr = "op('setlist')['ballad', 'bpm']" }
+
+[[node]]
+id = 2
+name = "dot"
+type = "img.shape"
+pos = [440.0, 0.0]
+params.shape = "circle"
+params.size = [0.5, 0.5]
+
+[[node]]
+id = 3
+name = "flash"
+type = "img.level"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.brightness = { value = 1.0, expr = "1 - op('clock')['beat_phase']" }
+
+[[node]]
+id = 4
+name = "main_out"
+type = "cmp.window"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }

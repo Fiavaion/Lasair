@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Tempo from table"
+description = "Reference solution for x-tempo-from-table."
+resolution = [1280, 720]

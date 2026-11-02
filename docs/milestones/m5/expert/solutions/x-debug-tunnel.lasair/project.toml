@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Tunnel fixed"
+description = "Reference solution for x-debug-tunnel."
+resolution = [1280, 720]

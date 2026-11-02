@@ -57,6 +57,12 @@
 //! - `animated`: something outside the channel nodes moves.
 //! - Always one point: every node cooks without an error.
 //!
+//! The expert tier adds behavioural entries to `exprs` (`at`, `component`,
+//! `wrap`, `live`, `rate`, `swing`, `cycle`, `fallback`), which evaluate the
+//! drive of the parameter at chosen times (`drive.rs`), and `inputs`, a node's
+//! input wired straight from a node of a type; see the header of
+//! `docs/milestones/m5/eval-prompts-expert.toml`.
+//!
 //! A model error makes the run invalid (and is named in the reasons) but
 //! adds nothing to the points possible, so every model faces the same
 //! maximum.
@@ -66,6 +72,10 @@
 //! family prefix when it ends in a dot (`sig.`). It may list alternatives
 //! with `|`: `"pnt.noise|pnt.turbulence"` matches either, for prompts a
 //! model can rightly answer more than one way.
+
+mod drive;
+#[cfg(test)]
+mod expert_tests;
 
 use std::path::{Path, PathBuf};
 
@@ -107,6 +117,9 @@ pub(crate) struct Prompt {
     pub either: Vec<EitherCheck>,
     #[serde(default)]
     pub wired: Vec<WiredCheck>,
+    /// A node's input fed directly by a node of a type.
+    #[serde(default)]
+    pub inputs: Vec<InputCheck>,
     /// A project directory (relative to where `lasair` runs) the run starts
     /// from, instead of an empty project.
     #[serde(default)]
@@ -161,6 +174,19 @@ pub(crate) struct Group {
     pub exprs: Vec<ExprCheck>,
     #[serde(default)]
     pub count: Vec<CountCheck>,
+    #[serde(default)]
+    pub inputs: Vec<InputCheck>,
+}
+
+/// Some node of `type` has its input `input` wired straight from a node of
+/// type `from`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InputCheck {
+    #[serde(rename = "type")]
+    pub type_id: String,
+    pub input: String,
+    pub from: String,
 }
 
 /// A node of `type` named, or titled, with `title_contains` that has a node
@@ -199,6 +225,36 @@ pub(crate) struct ExprCheck {
     /// 1]`, or the row's index (`op('t')[2, 1]` when `mid` is row 2).
     #[serde(default)]
     pub row: Option<String>,
+    /// What the drive gives at chosen times (evaluated, see `drive.rs`):
+    /// `[time, value]` (within 0.02 + 3%) or `[time, low, high]`.
+    #[serde(default)]
+    pub at: Vec<Vec<f64>>,
+    /// The vector component the `at`, `rate` and `swing` tests read.
+    #[serde(default)]
+    pub component: Option<usize>,
+    /// `at` values compare modulo this (hue in degrees: 360).
+    #[serde(default)]
+    pub wrap: Option<f64>,
+    /// After an edit of the table's numbers the drive gives something else.
+    #[serde(default)]
+    pub live: bool,
+    /// The drive's mean speed over 10 s, in units per second, lies in this
+    /// range (its size, whichever way it turns).
+    #[serde(default)]
+    pub rate: Option<[f64; 2]>,
+    /// The drive swings between these values over 200 s (within 10% of the
+    /// span).
+    #[serde(default)]
+    pub swing: Option<[f64; 2]>,
+    /// The drive repeats every this many seconds, and not faster: it gives
+    /// the same at `t` and `t + cycle`, another value half a cycle on.
+    #[serde(default)]
+    pub cycle: Option<f64>,
+    /// A drive the evaluator cannot model (Python, an Envelope, a Select
+    /// over a table, ...) passes the behaviour tests when a node of this
+    /// type is read by it or upstream of it.
+    #[serde(default)]
+    pub fallback: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,6 +353,12 @@ impl Prompt {
                 format!("not met in any accepted way: {}", e.label),
             );
         }
+        for c in &self.inputs {
+            check(
+                input_ok(net, c),
+                format!("no {} with {} fed by {}", c.type_id, c.input, c.from),
+            );
+        }
         for w in &self.wired {
             check(
                 wired_ok(net, w),
@@ -353,6 +415,20 @@ fn group_ok(net: &Network, registry: &Registry, g: &Group) -> bool {
         && g.params.iter().all(|c| param_check_ok(net, registry, c))
         && g.exprs.iter().all(|c| expr_check_ok(net, registry, c))
         && g.count.iter().all(|c| count_ok(net, c))
+        && g.inputs.iter().all(|c| input_ok(net, c))
+}
+
+fn input_ok(net: &Network, c: &InputCheck) -> bool {
+    net.nodes()
+        .filter(|n| type_matches(&n.type_id, &c.type_id))
+        .any(|n| {
+            net.inputs_of(n.id).any(|(name, from)| {
+                name == c.input
+                    && net
+                        .node(from.node)
+                        .is_some_and(|f| type_matches(&f.type_id, &c.from))
+            })
+        })
 }
 
 /// Every node upstream of `id` (through wires and channel bindings).
@@ -688,7 +764,10 @@ fn swing_of(net: &Network, registry: &Registry, id: NodeId, depth: u32) -> Optio
     None
 }
 
-fn driven_ok(net: &Network, registry: &Registry, p: &Param, c: &ExprCheck) -> bool {
+fn driven_ok(net: &Network, registry: &Registry, n: &Node, name: &str, c: &ExprCheck) -> bool {
+    let Some(p) = n.params.get(name) else {
+        return false;
+    };
     let source = p.bind.as_ref().and_then(|b| net.node(b.node));
     let num = |n: &Node, name: &str| {
         net.param_value(registry, n.id, name)
@@ -752,16 +831,146 @@ fn driven_ok(net: &Network, registry: &Registry, p: &Param, c: &ExprCheck) -> bo
             || refs.iter().any(|n| repeating(n))
             || p.expr.as_deref().is_some_and(|e| modulo_form(e, t))
     });
-    ok && in_range && repeats
+    ok && in_range && repeats && behaves(net, registry, n, name, p, c)
+}
+
+/// The `at`, `live`, `rate` and `swing` tests of an `exprs` entry (true when
+/// it sets none).
+fn behaves(
+    net: &Network,
+    registry: &Registry,
+    n: &Node,
+    name: &str,
+    p: &Param,
+    c: &ExprCheck,
+) -> bool {
+    if c.at.is_empty() && !c.live && c.rate.is_none() && c.swing.is_none() && c.cycle.is_none() {
+        return true;
+    }
+    let comp = c.component.unwrap_or(0);
+    let at = |t: f64, perturb: bool| {
+        drive::Eval {
+            net,
+            registry,
+            t,
+            perturb,
+        }
+        .drive(n.id, name, comp, 0)
+    };
+    // A drive that cannot be evaluated passes when it reads the named node.
+    let fallback = || {
+        c.fallback.as_ref().is_some_and(|f| {
+            let mut from: Vec<NodeId> = p
+                .expr
+                .as_deref()
+                .map(op_refs)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|r| net.node_by_name(r))
+                .map(|r| r.id)
+                .collect();
+            from.extend(p.bind.as_ref().map(|b| b.node));
+            from.into_iter().any(|id| {
+                upstream_nodes(net, id)
+                    .into_iter()
+                    .filter_map(|u| net.node(u))
+                    .any(|u| type_matches(&u.type_id, f))
+            })
+        })
+    };
+    let near = |v: f64, want: f64| {
+        let d = match c.wrap {
+            Some(w) => {
+                let d = (v - want).rem_euclid(w);
+                d.min(w - d)
+            }
+            None => (v - want).abs(),
+        };
+        d <= 0.02 + 0.03 * want.abs()
+    };
+    for pt in &c.at {
+        match (at(pt[0], false), pt.as_slice()) {
+            (Ok(v), [_, want]) if near(v, *want) => {}
+            (Ok(v), [_, lo, hi]) if v >= lo - 0.02 && v <= hi + 0.02 => {}
+            (Err(drive::Fail::Unsupported), _) => return fallback(),
+            _ => return false,
+        }
+    }
+    if c.live {
+        let t = c.at.first().map_or(1.0, |pt| pt[0]);
+        match (at(t, false), at(t, true)) {
+            (Ok(a), Ok(b)) if (a - b).abs() > 1e-6 => {}
+            (Err(drive::Fail::Unsupported), _) | (_, Err(drive::Fail::Unsupported)) => {
+                return fallback();
+            }
+            _ => return false,
+        }
+    }
+    if let Some([lo, hi]) = c.rate {
+        match (at(0.0, false), at(10.0, false)) {
+            (Ok(a), Ok(b)) => {
+                let r = ((b - a) / 10.0).abs();
+                if r < lo || r > hi {
+                    return false;
+                }
+            }
+            (Err(drive::Fail::Unsupported), _) | (_, Err(drive::Fail::Unsupported)) => {
+                return fallback();
+            }
+            _ => return false,
+        }
+    }
+    if let Some(period) = c.cycle {
+        let mut slower = false;
+        for t in [0.3, 1.1, 2.7, 3.3] {
+            match (
+                at(t, false),
+                at(t + period, false),
+                at(t + period / 2.0, false),
+            ) {
+                (Ok(a), Ok(b), Ok(half)) => {
+                    if (a - b).abs() > 0.02 + 0.03 * a.abs() {
+                        return false;
+                    }
+                    slower |= (a - half).abs() > 0.02 + 0.03 * a.abs();
+                }
+                (Err(drive::Fail::Unsupported), ..)
+                | (_, Err(drive::Fail::Unsupported), _)
+                | (.., Err(drive::Fail::Unsupported)) => return fallback(),
+                _ => return false,
+            }
+        }
+        if !slower {
+            return false;
+        }
+    }
+    if let Some([lo, hi]) = c.swing {
+        let (mut min, mut max) = (f64::MAX, f64::MIN);
+        for k in 0..=800 {
+            match at(f64::from(k) * 0.25, false) {
+                Ok(v) => {
+                    min = min.min(v);
+                    max = max.max(v);
+                }
+                Err(drive::Fail::Unsupported) => return fallback(),
+                Err(drive::Fail::Bad) => return false,
+            }
+        }
+        let tol = 0.1 * (hi - lo).abs() + 1e-3;
+        if (min - lo).abs() > tol || (max - hi).abs() > tol {
+            return false;
+        }
+    }
+    true
 }
 
 fn expr_ok(net: &Network, registry: &Registry, n: &Node, c: &ExprCheck) -> bool {
     match &c.param {
-        Some(name) => n
+        Some(name) => driven_ok(net, registry, n, name, c),
+        None => n
             .params
-            .get(name)
-            .is_some_and(|p| driven_ok(net, registry, p, c)),
-        None => n.params.values().any(|p| driven_ok(net, registry, p, c)),
+            .keys()
+            .any(|name| driven_ok(net, registry, n, name, c)),
     }
 }
 

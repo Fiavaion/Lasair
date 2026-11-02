@@ -1,0 +1,106 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 12
+
+[[node]]
+id = 0
+name = "bg"
+type = "img.ramp"
+pos = [0.0, 0.0]
+params.colour_a = [0.1, 0.2, 0.5, 1.0]
+params.colour_b = [0.0, 0.0, 0.1, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 1
+name = "badge"
+type = "img.shape"
+pos = [220.0, 0.0]
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.35, 0.35]
+
+[[node]]
+id = 2
+name = "wobble"
+type = "img.transform"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.rotate = { value = 0.0, expr = "sin(time * 2) * 20" }
+
+[[node]]
+id = 3
+name = "stack"
+type = "img.composite"
+pos = [660.0, 0.0]
+inputs.a = { node = 2, output = "out" }
+inputs.b = { node = 0, output = "out" }
+params.operation = "over"
+
+[[node]]
+id = 4
+name = "echo"
+type = "img.feedback"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+inputs.loop = { node = 7, output = "out" }
+
+[[node]]
+id = 5
+name = "echo_move"
+type = "img.transform"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.scale = [1.02, 1.02]
+
+[[node]]
+id = 6
+name = "echo_fade"
+type = "img.level"
+pos = [1320.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.brightness = 0.85
+
+[[node]]
+id = 7
+name = "echo_mix"
+type = "img.composite"
+pos = [1540.0, 0.0]
+inputs.a = { node = 3, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.operation = "maximum"
+
+[[node]]
+id = 8
+name = "title"
+type = "img.text"
+pos = [0.0, 140.0]
+inputs.in = { node = 7, output = "out" }
+params.colour = [1.0, 1.0, 1.0, 1.0]
+params.size = 0.12
+params.text = "TONIGHT"
+
+[[node]]
+id = 9
+name = "pulse"
+type = "sig.lfo"
+pos = [220.0, 140.0]
+params.amplitude = 0.3
+params.frequency = 0.5
+params.offset = 0.8
+
+[[node]]
+id = 10
+name = "glow"
+type = "img.bloom"
+pos = [440.0, 140.0]
+inputs.in = { node = 8, output = "out" }
+params.intensity = { value = 1.0, bind = { node = 9 } }
+
+[[node]]
+id = 11
+name = "main_out"
+type = "cmp.window"
+pos = [660.0, 140.0]
+inputs.in = { node = 10, output = "out" }
+params.title = "Logo"

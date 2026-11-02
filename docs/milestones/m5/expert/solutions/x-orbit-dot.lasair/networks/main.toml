@@ -1,0 +1,71 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 8
+
+[[node]]
+id = 0
+name = "swing_x"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 0.3
+params.frequency = 0.125
+params.offset = 0.5
+params.phase = 0.25
+
+[[node]]
+id = 1
+name = "swing_y"
+type = "sig.lfo"
+pos = [220.0, 0.0]
+params.amplitude = 0.3
+params.frequency = 0.125
+params.offset = 0.5
+
+[[node]]
+id = 2
+name = "both"
+type = "sig.merge"
+pos = [440.0, 0.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+
+[[node]]
+id = 3
+name = "dot"
+type = "img.shape"
+pos = [660.0, 0.0]
+params.centre = { value = [0.5, 0.5], bind = { node = 2 } }
+params.shape = "circle"
+params.size = [0.1, 0.1]
+
+[[node]]
+id = 4
+name = "tail"
+type = "img.feedback"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+inputs.loop = { node = 6, output = "out" }
+
+[[node]]
+id = 5
+name = "tail_fade"
+type = "img.level"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.brightness = 0.9
+
+[[node]]
+id = 6
+name = "mix"
+type = "img.composite"
+pos = [1320.0, 0.0]
+inputs.a = { node = 3, output = "out" }
+inputs.b = { node = 5, output = "out" }
+params.operation = "maximum"
+
+[[node]]
+id = 7
+name = "main_out"
+type = "cmp.window"
+pos = [1540.0, 0.0]
+inputs.in = { node = 6, output = "out" }

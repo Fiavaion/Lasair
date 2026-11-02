@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Comet"
+description = "Reference solution for x-economy-comet."
+resolution = [1280, 720]

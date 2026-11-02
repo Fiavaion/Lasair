@@ -250,6 +250,9 @@ fn request_body(cfg: &ChatConfig, messages: &[Message]) -> (&'static str, Value)
                 "model": cfg.model(),
                 "messages": msgs(true),
                 "stream": false,
+                // A thinking model would spend max_tokens thinking and reply
+                // with nothing.
+                "think": false,
                 "options": {"temperature": cfg.temperature, "num_predict": cfg.max_tokens},
             }),
         ),
@@ -583,6 +586,7 @@ mod tests {
         assert_eq!(body["model"], OLLAMA_MODEL);
         assert_eq!(body["stream"], false);
         assert_eq!(body["options"]["num_predict"], 64);
+        assert_eq!(body["think"], false);
         assert_eq!(
             body["messages"],
             json!([

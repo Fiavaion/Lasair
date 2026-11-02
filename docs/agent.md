@@ -130,6 +130,8 @@ ollama pull qwen2.5-coder:7b
 lasair agent ask show.lasair "a kaleidoscope of moving noise"
 lasair agent eval --out docs/milestones/m5/eval.md      # M5 AC1
 lasair agent eval --provider anthropic --model claude-sonnet-5-5 --allow-internet
+lasair agent eval --keep kept/ --out run.md                # keep every network built
+lasair agent judge --prompts <toml> --kept kept/ --report run.md --out rescored.md   # re-score kept networks, no model
 ```
 
 ### Assist levels
@@ -141,7 +143,7 @@ model can be compared with and without the harness (PRD A72). The eval report he
 | Level | What the model gets |
 |---|---|
 | `bare` | The plain tool loop only. Short rules (what a patch is, use the tools, accept and fix errors); no operator list, no retrieved docs, no planned mode, no nudge or repair prompts. It finds operators with `list_ops` and `get_schema`. Same tools and `--max-steps`. |
-| `standard` (default) | What the app does: the operator list, lexical retrieval of operator docs, planned mode (a schema-constrained JSON plan, restaged each round, up to 4 rounds repaired from staging and cook errors) for models that support it, the tool loop otherwise. On a project that already has nodes the planned prompt shows the whole network as JSON and asks to keep node names; on an empty project the prompts are the same as before levels existed. |
+| `standard` (default) | What the app does: the operator list, lexical retrieval of operator docs, planned mode (a schema-constrained JSON plan, restaged each round, up to 4 rounds repaired from staging and cook errors) for models that support it, the tool loop otherwise. On a project that already has nodes the planned prompt shows the whole network as JSON and asks to keep node names, and so does the tool-loop prompt; on an empty project the prompts are the same as before levels existed. A plan is the WHOLE network: each plan round replaces it, so nodes the plan omits are deleted and a kept node has exactly the wires and channel bindings the plan lists (node IDs stay stable for nodes kept by name). |
 | `full` | Standard plus: **semantic retrieval** (one chunk per operator, the corpus of `docs/operators`, embedded with Ollama `/api/embed`; the 8 nearest are merged with the lexical hits and written as full schemas); **worked examples** (the shipped `examples/*.lasair` that fit a prompt, the 2 nearest as compact network JSON); **plan validation** before staging (unknown types, unknown parameters, values outside the schema, wires to nothing or to a missing socket, wire type mismatches, required inputs with no wire), answered with a message naming the node and the valid options; **up to 6 repair rounds**; and one **self-review** after a clean accept: the model gets the request and a plain description of the network and says what is missing or wrong, and a plan round follows if it names something. The review sees neither the eval nor its checks. A model without structured output gets the retrieval and examples in the tool loop. |
 
 `full` needs the embedding model (`ollama pull qwen3-embedding:0.6b`; change it with

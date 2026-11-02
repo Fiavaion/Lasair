@@ -56,8 +56,32 @@ instead of reading the rows live).
 | Sonnet 5.5 | standard | 12 / 12 / 11 | 100 / 100 / 100% | 18 |
 | Haiku 5.5 | standard | 8 / 10 / 5 | 95 / 98 / 91% | 36 |
 
-Local models on the expert set are still running (all three assist levels);
-see the dashboard. Opus 5.5 was not run on the hard or expert sets: Sonnet
+| Model | Assist | Valid per run | Checks per run | Median s/prompt |
+|---|---|---|---|---|
+| Qwen3.6 35B | bare | 2 / 1 / 2 | 63 / 69 / 68% | 64 |
+| Qwen3.6 35B | standard | 0 / 0 / 0 | 58 / 60 / 65% | 16 |
+| Qwen3.6 35B | full | 0 / 0 / 0 | 67 / 72 / 66% | 26 |
+| Gemma 4 12B | bare | 0 / 0 / 0 | 54 / 55 / 54% | 68 |
+| Gemma 4 12B | standard | 0 / 0 / 0 | 69 / 68 / 68% | 36 |
+| Gemma 4 12B | full | 1 / 1 / 1 | 67 / 72 / 71% | 48 |
+| Qwen2.5 Coder 7B | bare | 0 / 0 / 0 | 45 / 43 / 43% | 52 |
+| Qwen2.5 Coder 7B | standard | 0 / 0 / 0 | 61 / 63 / 61% | 54 |
+| Qwen2.5 Coder 7B | full | 0 / 0 / 0 | 67 / 65 / 66% | 70 |
+
+Qwen3.6 35B standard run 2 first stopped with a GPU validation panic (an
+MSH readback dropped mid-flight; fixed in fb3ee99); the row above is its
+re-run on the fixed build.
+
+Every local valid patch on the expert set is a debugging prompt, which
+starts from a seeded patch: `x-debug-tunnel` (Gemma full ×3, Qwen3.6 bare
+×3), `x-debug-logo-wobble` and `x-debug-colour-show` (Qwen3.6 bare, once
+each). Qwen3.6 fixes the tunnel in every bare run (the tool loop: targeted
+edits) and in no standard or full run (planned mode: the whole network
+rewritten as one plan). Open question for the app: for an edit to an
+existing patch, prefer the tool loop over a planned rebuild, at least on
+local models.
+
+Opus 5.5 was not run on the hard or expert sets: Sonnet
 already scores every check, so a harder tier is needed before Opus can show
 a difference.
 
@@ -78,5 +102,8 @@ a difference.
   `h-torus-dust`, `h-tunnel-two-screens`, `h-stark-poster`); all do well on
   edits and repairs (`h-share-one-source`, `h-wire-the-signals`,
   `h-show-change-request`, `h-fix-broken-chain`).
+- The expert set is beyond every local model (0–2 of 12 valid per run, 43–72%
+  of checks); their misses are the behaviours the tier tests: stepping cues
+  over time, live links to a table, closed feedback loops.
 - Bare-mode failures were audited against the kept networks: they are real
   (wrong or invented operators), not checker artifacts.

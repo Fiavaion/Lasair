@@ -253,7 +253,7 @@ impl Rows {
             if ok { "valid" } else { "**invalid**" },
             net.len(),
             kinds.join(", "),
-            why.join("; ").replace('|', "/"),
+            why.join("; ").replace('|', "/").replace(['\n', '\r'], " "),
             verdict.points,
             verdict.max
         );
@@ -549,6 +549,30 @@ mod tests {
 
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// A reason with a line break (a kernel's compile error) stays on its
+    /// row, so the report table keeps one line per prompt.
+    #[test]
+    fn a_multi_line_reason_stays_on_one_row() {
+        let mut rows = Rows::default();
+        let v = Verdict {
+            points: 1,
+            max: 2,
+            why: vec![],
+            model_error: false,
+        };
+        let why = ["1 node error(s): float a = mod(x,\n  ^ here\r\n".to_owned()];
+        rows.add(
+            "p",
+            &lsr_core::graph::Network::default(),
+            &v,
+            &why,
+            "0/1",
+            "1 s",
+        );
+        assert_eq!(rows.text.lines().count(), 1, "{}", rows.text);
+        assert_eq!(rows.text.matches('|').count(), 9);
     }
 
     fn scratch(name: &str) -> PathBuf {

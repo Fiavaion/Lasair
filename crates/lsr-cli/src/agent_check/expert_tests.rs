@@ -569,3 +569,24 @@ fn a_sixth_node_loses_the_economy_budget() {
     let v = p.judge(&net, &registry, &[], None);
     assert!(lost(&v, "nodes > 5"), "{:?}", v.why);
 }
+
+/// Networks models built that answer a prompt another right way (a pulsing
+/// size written as an expression, colour before the fold, a hue that goes
+/// round the wheel twice, a Level opacity fade, ...): `<id>--<what>.lasair`.
+#[test]
+fn right_answers_the_models_found_score_full_points() {
+    let dir = root().join("docs/milestones/m5/expert/alternatives");
+    let mut seen = 0;
+    let mut failures = Vec::new();
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let path = e.unwrap().path();
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let (v, _) = score(&prompt(name.split("--").next().unwrap()), &path);
+        seen += 1;
+        if !v.valid() {
+            failures.push(format!("{name}: {}/{} {:?}", v.points, v.max, v.why));
+        }
+    }
+    assert!(seen >= 6);
+    assert!(failures.is_empty(), "{failures:#?}");
+}

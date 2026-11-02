@@ -246,6 +246,10 @@ pub(crate) struct ExprCheck {
     /// span).
     #[serde(default)]
     pub swing: Option<[f64; 2]>,
+    /// The drive covers at least this span over 200 s (90% of it), wherever
+    /// it lies: a hue that goes once round the wheel or further.
+    #[serde(default)]
+    pub span: Option<f64>,
     /// The drive repeats every this many seconds, and not faster: it gives
     /// the same at `t` and `t + cycle`, another value half a cycle on.
     #[serde(default)]
@@ -844,7 +848,13 @@ fn behaves(
     p: &Param,
     c: &ExprCheck,
 ) -> bool {
-    if c.at.is_empty() && !c.live && c.rate.is_none() && c.swing.is_none() && c.cycle.is_none() {
+    if c.at.is_empty()
+        && !c.live
+        && c.rate.is_none()
+        && c.swing.is_none()
+        && c.span.is_none()
+        && c.cycle.is_none()
+    {
         return true;
     }
     let comp = c.component.unwrap_or(0);
@@ -944,7 +954,7 @@ fn behaves(
             return false;
         }
     }
-    if let Some([lo, hi]) = c.swing {
+    if c.swing.is_some() || c.span.is_some() {
         let (mut min, mut max) = (f64::MAX, f64::MIN);
         for k in 0..=800 {
             match at(f64::from(k) * 0.25, false) {
@@ -956,8 +966,13 @@ fn behaves(
                 Err(drive::Fail::Bad) => return false,
             }
         }
-        let tol = 0.1 * (hi - lo).abs() + 1e-3;
-        if (min - lo).abs() > tol || (max - hi).abs() > tol {
+        if let Some([lo, hi]) = c.swing {
+            let tol = 0.1 * (hi - lo).abs() + 1e-3;
+            if (min - lo).abs() > tol || (max - hi).abs() > tol {
+                return false;
+            }
+        }
+        if c.span.is_some_and(|w| max - min < 0.9 * w) {
             return false;
         }
     }

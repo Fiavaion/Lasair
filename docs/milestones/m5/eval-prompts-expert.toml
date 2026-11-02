@@ -33,7 +33,7 @@
 id = "x-cue-steps"
 text = """I run a four-cue sheet from a table: rows called intro, verse, chorus and outro, with a brightness of 0.3, 0.6, 1 and 0.5, and a spin in degrees of 0, 20, 45 and 90. Show slowly moving clouds and step through the cues by themselves, one cue every 3 seconds, round and round, so the clouds' brightness and rotation always follow the current cue. I edit that table during the show and the picture has to follow my edits."""
 require = ["dat.table", "img.noise", "img.transform"]
-min_nodes = 5
+min_nodes = 4
 animated = true
 params = [
   { type = "dat.table", name = "rows", contains = "intro" },
@@ -67,7 +67,7 @@ either = [{ label = "the brightness follows the current cue, live (a Level brigh
 id = "x-look-sheet"
 text = """I keep a looks sheet in a table: rows calm and wild, with columns for a hue shift in degrees (0 and 140), a zoom (1 and 1.8) and a blur in pixels (2 and 24). Show slowly moving clouds in the wild look: the hue shift, the zoom and the blur all have to come from the wild row of that sheet. The sheet is what I tweak mid-show, so changing a number there must change the picture at once, and nothing may be typed in twice."""
 require = ["dat.table", "img.noise", "img.hsv_adjust", "img.transform", "img.blur"]
-min_nodes = 6
+min_nodes = 5
 animated = true
 params = [
   { type = "dat.table", name = "rows", contains = "calm" },
@@ -205,8 +205,7 @@ either = [
     { exprs = [{ type = "img.level", param = "brightness", swing = [0.4, 1.0], cycle = 4 }] },
   ] },
   { label = "the colours cover the whole wheel (hue swings through 360 degrees)", any = [
-    { exprs = [{ type = "img.hsv_adjust", param = "hue", swing = [-180, 180] }] },
-    { exprs = [{ type = "img.hsv_adjust", param = "hue", swing = [0, 360] }] },
+    { exprs = [{ type = "img.hsv_adjust", param = "hue", span = 360 }] },
   ] },
   { label = "the sparkles show (the sparkles are the top layer, or they are added on)", any = [
     { inputs = [{ type = "img.composite", input = "a", from = "img.tile|img.shape" }] },
@@ -343,6 +342,7 @@ either = [
     { params = [{ type = "img.hsv_adjust", name = "value", min = 0.5, max = 0.98 }] },
     { params = [{ type = "img.blend", name = "mix", min = 0.5, max = 0.98 }] },
     { params = [{ type = "img.composite", name = "opacity", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.level", name = "opacity", min = 0.5, max = 0.98 }] },
   ] },
   { label = "the dot is at the right at the start and goes round counter-clockwise (the Shape's centre moves through 0.8,0.5 / 0.5,0.8 / 0.2,0.5 / 0.5,0.2 at 0, 2, 4 and 6 s)", any = [
     { exprs = [
@@ -397,22 +397,22 @@ require = ["img.shape", "img.kaleidoscope", "img.ramp", "cmp.window"]
 min_nodes = 5
 max_nodes = 5
 animated = true
-paths = [
-  "img.shape > img.kaleidoscope > img.lookup|img.composite|img.blend|img.mixer > cmp.window",
-  "img.ramp > img.lookup|img.composite|img.blend|img.mixer",
-]
+paths = ["img.ramp > img.lookup|img.composite|img.blend|img.mixer"]
 params = [
   { type = "img.shape", name = "shape", eq = "polygon" },
   { type = "img.shape", name = "sides", eq = 3 },
   { type = "img.kaleidoscope", name = "segments", eq = 12 },
   # Deep teal: little red, blue-green; gold: strong red, some green, little blue.
   { type = "img.ramp", name = "colour_a", component = 0, max = 0.2 },
-  { type = "img.ramp", name = "colour_a", component = 2, min = 0.2 },
+  { type = "img.ramp", name = "colour_a", component = 2, min = 0.1 },
   { type = "img.ramp", name = "colour_b", component = 0, min = 0.8 },
   { type = "img.ramp", name = "colour_b", component = 2, max = 0.4 },
 ]
 count = [{ type = "cmp.window", min = 1, max = 1 }]
-either = [{ label = "it turns once a minute (6 degrees a second on the kaleidoscope rotation or on the shape)", any = [
+either = [{ label = "the gradient colours the folded triangle (colour then fold, or fold then colour)", any = [
+  { paths = ["img.shape > img.kaleidoscope > img.lookup|img.composite|img.blend|img.mixer > cmp.window"] },
+  { paths = ["img.shape > img.lookup|img.composite|img.blend|img.mixer > img.kaleidoscope > cmp.window"] },
+] }, { label = "it turns once a minute (6 degrees a second on the kaleidoscope rotation or on the shape)", any = [
   { exprs = [{ type = "img.kaleidoscope", param = "rotation", rate = [5, 7] }] },
   { exprs = [{ type = "img.shape", param = "rotate", rate = [5, 7] }] },
 ] }]
@@ -431,7 +431,6 @@ paths = [
 ]
 params = [
   { type = "img.shape", name = "shape", eq = "circle" },
-  { type = "img.shape", name = "size", max = 0.15 },
   # The tail swirls outwards: a turn and a zoom per pass.
   { type = "img.transform", name = "scale", component = 0, min = 1.001 },
 ]
@@ -443,6 +442,7 @@ either = [
     { params = [{ type = "img.composite", name = "opacity", min = 0.5, max = 0.98 }] },
     { params = [{ type = "img.level", name = "brightness", min = 0.5, max = 0.98 }] },
     { params = [{ type = "img.hsv_adjust", name = "value", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.level", name = "opacity", min = 0.5, max = 0.98 }] },
   ] },
   { label = "the tail turns (the transform rotates a little each pass)", any = [
     { params = [{ type = "img.transform", name = "rotate", min = 0.1 }] },

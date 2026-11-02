@@ -282,7 +282,7 @@ impl OpenAiCompat {
     fn chat_body(&self, messages: &[Value], tools: &[Value]) -> Value {
         let mut body = json!({
             "model": self.model,
-            "messages": messages,
+            "messages": openai_history(messages),
             "temperature": 0.2,
             "max_tokens": 2048,
             "stream": false,
@@ -298,7 +298,7 @@ impl OpenAiCompat {
     fn json_body(&self, messages: &[Value]) -> Value {
         json!({
             "model": self.model,
-            "messages": messages,
+            "messages": openai_history(messages),
             "temperature": 0.2,
             "max_tokens": 4096,
             "stream": false,
@@ -378,6 +378,37 @@ fn strip_think(text: &str) -> String {
 }
 
 /// `choices[0].message` in the shape the loop expects.
+/// The loop's history in strict OpenAI form: each earlier tool call as
+/// `{id, type: "function", function: {name, arguments}}` with the arguments
+/// as a JSON string (the history keeps them as an object, as Ollama wants),
+/// and nothing else on the call. vLLM refuses any other shape with a 400.
+fn openai_history(messages: &[Value]) -> Vec<Value> {
+    messages
+        .iter()
+        .map(|m| {
+            let Some(calls) = m["tool_calls"].as_array() else {
+                return m.clone();
+            };
+            let mut m = m.clone();
+            m["tool_calls"] = calls
+                .iter()
+                .map(|c| {
+                    let f = &c["function"];
+                    let name = f["name"].as_str().or(c["name"].as_str()).unwrap_or_default();
+                    let args = if f["arguments"].is_null() { &c["arguments"] } else { &f["arguments"] };
+                    let args = match args.as_str() {
+                        Some(t) => t.to_owned(),
+                        None if args.is_null() => "{}".to_owned(),
+                        None => args.to_string(),
+                    };
+                    json!({"id": c["id"], "type": "function", "function": {"name": name, "arguments": args}})
+                })
+                .collect();
+            m
+        })
+        .collect()
+}
+
 fn openai_message(r: &Value) -> Value {
     let m = &r["choices"][0]["message"];
     let calls: Vec<Value> = m["tool_calls"]
@@ -1358,6 +1389,34 @@ mod tests {
 
     /// The OpenAI-compatible requests: tools, thinking off, JSON mode on
     /// the plan call, the bearer header only when there is a key.
+    #[test]
+    fn openai_history_sends_tool_calls_in_strict_form() {
+        // As the tool loop stores them: arguments an object, name twice.
+        let history = vec![
+            json!({"role": "user", "content": "add noise"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [{
+                "id": "call_1_0", "name": "list_operators", "arguments": {"family": "img"},
+                "function": {"name": "list_operators", "arguments": {"family": "img"}}}]}),
+            json!({"role": "tool", "tool_call_id": "call_1_0", "name": "list_operators", "content": "img.noise"}),
+        ];
+        let out = openai_history(&history);
+        assert_eq!(out[0], history[0]);
+        let call = &out[1]["tool_calls"][0];
+        assert_eq!(
+            call,
+            &json!({"id": "call_1_0", "type": "function",
+            "function": {"name": "list_operators", "arguments": "{\"family\":\"img\"}"}})
+        );
+        assert_eq!(out[2]["tool_call_id"], "call_1_0");
+        let body = OpenAiCompat {
+            base_url: "http://h:8000/v1".into(),
+            key: None,
+            model: "m".into(),
+        }
+        .chat_body(&history, &[]);
+        assert!(body["messages"][1]["tool_calls"][0]["function"]["arguments"].is_string());
+    }
+
     #[test]
     fn openai_requests_and_replies() {
         use std::io::{BufRead, BufReader, Read, Write};

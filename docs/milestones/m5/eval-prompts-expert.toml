@@ -1,0 +1,457 @@
+# M5 AC1, expert tier: 12 prompts that separate Claude Haiku 5.5 from Sonnet 5.5
+# (`lasair agent eval --prompts docs/milestones/m5/eval-prompts-expert.toml`).
+# The hard tier (eval-prompts-hard.toml) scores Sonnet 15/15 and Haiku 14/15;
+# the one thing Haiku misses there is a live link (it copies a table's numbers).
+#
+# Same file format and checks as the hard tier (see `agent_check.rs`), plus
+# the behavioural checks of this tier, which evaluate the drive of a parameter
+# with the engine's own expression evaluator (`agent_check/drive.rs`):
+#   exprs.at        [[time, value], [time, low, high]]: what the drive gives then
+#   exprs.component the vector component those tests read
+#   exprs.wrap      values compare modulo this (hue: 360)
+#   exprs.live      after the table's numbers are edited the drive gives
+#                   something else (so it reads the table, it is not a copy)
+#   exprs.rate      speed over 10 s, units per second, whichever way
+#   exprs.swing     the values the drive swings between over 200 s
+#   exprs.cycle     the drive repeats every this many seconds, and not faster
+#   exprs.fallback  a drive the evaluator cannot model (Python, Envelope, a
+#                   Select over a table) passes when it reads / is fed by a
+#                   node of this type
+#   inputs          {type, input, from}: a node's input wired straight from a node
+#
+# Reference solutions (full points) are in expert/solutions/<id>.lasair, the
+# broken or unfinished starting projects in expert/seeds/<id>.lasair; the
+# tests of `agent_check::expert_tests` score both without a model, and score
+# the "copied numbers" and near-miss networks (which must lose points).
+#
+# Run it with --allow-python-ops: Python expressions the model writes are
+# otherwise not evaluated and count as node errors.
+
+# ---- Live data links ---------------------------------------------------------
+
+[[prompt]]
+id = "x-cue-steps"
+text = """I run a four-cue sheet from a table: rows called intro, verse, chorus and outro, with a brightness of 0.3, 0.6, 1 and 0.5, and a spin in degrees of 0, 20, 45 and 90. Show slowly moving clouds and step through the cues by themselves, one cue every 3 seconds, round and round, so the clouds' brightness and rotation always follow the current cue. I edit that table during the show and the picture has to follow my edits."""
+require = ["dat.table", "img.noise", "img.transform"]
+min_nodes = 4
+animated = true
+params = [
+  { type = "dat.table", name = "rows", contains = "intro" },
+  { type = "dat.table", name = "rows", contains = "verse" },
+  { type = "dat.table", name = "rows", contains = "chorus" },
+  { type = "dat.table", name = "rows", contains = "outro" },
+  { type = "dat.table", name = "rows", contains = "0.3" },
+  { type = "dat.table", name = "rows", contains = "0.6" },
+  { type = "dat.table", name = "rows", contains = "20" },
+  { type = "dat.table", name = "rows", contains = "45" },
+  { type = "dat.table", name = "rows", contains = "90" },
+]
+exprs = [
+  { type = "img.noise", param = "z", time_ok = true },
+  { type = "img.transform", param = "rotate", fallback = "dat.table", at = [[1.5, 0], [4.5, 20], [7.5, 45], [10.5, 90], [13.5, 0], [16.5, 20]] },
+  { type = "img.transform", param = "rotate", fallback = "dat.table", live = true },
+]
+# The brightness is each cue's level for 3 s, in order, and starts again.
+either = [{ label = "the brightness follows the current cue, live (a Level brightness or an HSV Adjust value)", any = [
+  { exprs = [
+      { type = "img.level", param = "brightness", fallback = "dat.table", at = [[1.5, 0.3], [4.5, 0.6], [7.5, 1], [10.5, 0.5], [13.5, 0.3], [16.5, 0.6]] },
+      { type = "img.level", param = "brightness", fallback = "dat.table", live = true },
+    ] },
+  { exprs = [
+      { type = "img.hsv_adjust", param = "value", fallback = "dat.table", at = [[1.5, 0.3], [4.5, 0.6], [7.5, 1], [10.5, 0.5], [13.5, 0.3], [16.5, 0.6]] },
+      { type = "img.hsv_adjust", param = "value", fallback = "dat.table", live = true },
+    ] },
+] }]
+
+[[prompt]]
+id = "x-look-sheet"
+text = """I keep a looks sheet in a table: rows calm and wild, with columns for a hue shift in degrees (0 and 140), a zoom (1 and 1.8) and a blur in pixels (2 and 24). Show slowly moving clouds in the wild look: the hue shift, the zoom and the blur all have to come from the wild row of that sheet. The sheet is what I tweak mid-show, so changing a number there must change the picture at once, and nothing may be typed in twice."""
+require = ["dat.table", "img.noise", "img.hsv_adjust", "img.transform", "img.blur"]
+min_nodes = 5
+animated = true
+params = [
+  { type = "dat.table", name = "rows", contains = "calm" },
+  { type = "dat.table", name = "rows", contains = "wild" },
+  { type = "dat.table", name = "rows", contains = "140" },
+  { type = "dat.table", name = "rows", contains = "1.8" },
+  { type = "dat.table", name = "rows", contains = "24" },
+]
+exprs = [
+  { type = "img.noise", param = "z", time_ok = true },
+  { type = "img.hsv_adjust", param = "hue", fallback = "dat.table", at = [[0, 140], [7, 140]] },
+  { type = "img.hsv_adjust", param = "hue", fallback = "dat.table", live = true },
+  { type = "img.transform", param = "scale", fallback = "dat.table", at = [[0, 1.8], [7, 1.8]] },
+  { type = "img.transform", param = "scale", fallback = "dat.table", live = true },
+  { type = "img.blur", param = "size", fallback = "dat.table", at = [[0, 24], [7, 24]] },
+  { type = "img.blur", param = "size", fallback = "dat.table", live = true },
+]
+
+[[prompt]]
+id = "x-tempo-from-table"
+text = """My setlist is a small table with the songs opener, ballad and finale and their tempos in BPM: 128, 72 and 140. Run a tempo clock that follows the ballad's tempo from that table, so when I change the number the clock follows. Show a big white circle that flashes with the beat: full brightness on every beat, fading to dark before the next one."""
+require = ["dat.table", "sig.beat", "img.shape"]
+min_nodes = 4
+animated = true
+params = [
+  { type = "dat.table", name = "rows", contains = "opener" },
+  { type = "dat.table", name = "rows", contains = "ballad" },
+  { type = "dat.table", name = "rows", contains = "finale" },
+  { type = "dat.table", name = "rows", contains = "128" },
+  { type = "dat.table", name = "rows", contains = "72" },
+  { type = "dat.table", name = "rows", contains = "140" },
+  { type = "img.shape", name = "shape", eq = "circle" },
+]
+exprs = [
+  { type = "sig.beat", param = "bpm", fallback = "dat.table", at = [[0, 72], [5, 72]] },
+  { type = "sig.beat", param = "bpm", fallback = "dat.table", live = true },
+  # The flash reads the clock ...
+  { type = "img.level|img.hsv_adjust|img.composite|img.blend|img.mixer|img.shape", from = "sig.beat", time_ok = true },
+  # ... and at 72 BPM (0.8333 s a beat) is bright on the beat and dark before the next.
+  { type = "img.level|img.hsv_adjust|img.composite|img.blend|img.mixer|img.shape", fallback = "sig.beat", at = [[0.01, 0.9, 99], [0.75, 0, 0.28], [0.8433, 0.9, 99], [1.5833, 0, 0.28], [2.5100, 0.9, 99], [3.2500, 0, 0.28]] },
+]
+
+# ---- Multi-fault debugging ---------------------------------------------------
+
+[[prompt]]
+id = "x-debug-tunnel"
+text = """My tunnel patch has four problems. The trails never fade, they just pile up until the picture is a white blur. The second output window stays black. The whole picture spins far too fast, it should take about a minute for one full turn. And the colours never move, and the node panel complains about the hue control. Fix these four things, keep all my nodes by name (clouds, fold, memory, spiral, fade, accumulate, main_out, second_out) and leave the rest of my settings alone."""
+seed = "docs/milestones/m5/expert/seeds/x-debug-tunnel.lasair"
+keep = ["clouds", "fold", "memory", "spiral", "fade", "accumulate", "main_out", "second_out"]
+min_nodes = 14
+max_nodes = 16
+animated = true
+paths = [
+  "img.noise > img.kaleidoscope > img.hsv_adjust > img.feedback > img.transform > img.level > img.composite > img.feedback",
+  "img.composite > img.bloom > img.blur > cmp.window",
+]
+params = [
+  # What was fine stays as it was.
+  { type = "img.noise", name = "octaves", eq = 4 },
+  { type = "img.kaleidoscope", name = "segments", eq = 8 },
+  { type = "img.composite", name = "operation", eq = "add" },
+  { type = "img.transform", name = "scale", eq = [1.01, 1.01] },
+]
+exprs = [
+  # The spin: about 6 degrees a second (30 s to 2 min a turn).
+  { type = "img.transform", param = "rotate", rate = [3, 12] },
+  # The hue is driven by the wander signal and reads a node that exists.
+  { type = "img.hsv_adjust", param = "hue", from = "sig.lfo" },
+]
+either = [{ label = "the trails fade (the loop's Level brightness between 0.5 and 0.99, or a Value below 1 on an HSV Adjust in the loop)", any = [
+  { params = [{ type = "img.level", name = "brightness", min = 0.5, max = 0.99 }] },
+  { params = [{ type = "img.hsv_adjust", name = "value", min = 0.5, max = 0.99 }], paths = ["img.feedback > img.hsv_adjust > img.composite > img.feedback"] },
+] }]
+wired = [
+  { type = "cmp.window", title_contains = "second", from = "img.noise" },
+  { type = "cmp.window", title_contains = "main", from = "img.noise" },
+]
+
+[[prompt]]
+id = "x-debug-logo-wobble"
+text = """Four things are wrong with my logo patch. The badge never shows, only the dark blue background. The badge is meant to rock about 20 degrees each way, but it barely moves. The echo trail behind it never appears. And the title never shows up at all. Please fix those four and keep my nodes (bg, badge, wobble, stack, echo, echo_fade, title, glow, main_out); leave everything else as it is."""
+seed = "docs/milestones/m5/expert/seeds/x-debug-logo-wobble.lasair"
+keep = ["bg", "badge", "wobble", "stack", "echo", "echo_fade", "title", "glow", "main_out"]
+min_nodes = 12
+max_nodes = 13
+animated = true
+paths = [
+  "img.shape > img.transform > img.composite > img.feedback > img.transform > img.level > img.composite > img.text > img.bloom > cmp.window",
+]
+params = [
+  { type = "img.shape", name = "sides", eq = 5 },
+  { type = "img.ramp", name = "type", eq = "radial" },
+  { type = "img.level", name = "brightness", eq = 0.85 },
+  { type = "img.text", name = "text", eq = "TONIGHT" },
+  { type = "img.composite", name = "operation", any_of = ["over", "maximum"] },
+]
+exprs = [
+  # It rocks 20 degrees each way.
+  { type = "img.transform", param = "rotate", swing = [-20, 20] },
+  # The glow keeps pulsing with its signal.
+  { type = "img.bloom", param = "intensity", bind = true, from = "sig.lfo" },
+]
+either = [
+  { label = "the badge is on top of the background (the stack's A input comes from the badge)", any = [
+    { inputs = [{ type = "img.composite", input = "a", from = "img.transform|img.shape" }] },
+  ] },
+  { label = "the echo loop is closed (the feedback is fed back from the loop)", any = [
+    { paths = ["img.feedback > img.composite|img.blend|img.mixer > img.feedback"] },
+    { paths = ["img.feedback > img.transform|img.level > img.feedback"] },
+  ] },
+  { label = "the title is visible (text colour opaque)", any = [
+    { params = [{ type = "img.text", name = "colour", component = 3, min = 0.9 }] },
+  ] },
+]
+
+[[prompt]]
+id = "x-debug-colour-show"
+text = """My colour show has four faults. The picture stutters and twitches instead of breathing slowly, it should swell and dim once every 4 seconds. The colours barely shift, but they should walk through the whole colour wheel, over a long time. The sparkles never appear, the clouds hide them. And the projector output looks soft and blocky, the projector is full HD (1920 by 1080). Fix those, keep my nodes (clouds, sparkle_tile, layer, colour_walk, tint, breath, dim, main_out) and don't change anything else."""
+seed = "docs/milestones/m5/expert/seeds/x-debug-colour-show.lasair"
+keep = ["clouds", "sparkle_tile", "layer", "colour_walk", "tint", "breath", "dim", "main_out"]
+min_nodes = 12
+max_nodes = 13
+animated = true
+paths = ["img.noise > img.composite > img.hsv_adjust > img.level > img.bloom > img.blur > img.resolution > cmp.window"]
+params = [
+  { type = "img.noise", name = "scale", eq = 3 },
+  { type = "img.tile", name = "repeat", eq = [6, 6] },
+  { type = "img.shape", name = "size", eq = [0.08, 0.08] },
+  { type = "cmp.window", name = "width", eq = 1920 },
+  { type = "cmp.window", name = "height", eq = 1080 },
+]
+either = [
+  { label = "one slow breath every 4 s on the brightness, between 0.4 and 1.0 as built", any = [
+    { exprs = [{ type = "img.level", param = "brightness", bind = true, from = "sig.lfo", period = 4, range = [0.4, 1.0] }] },
+    { exprs = [{ type = "img.level", param = "brightness", swing = [0.4, 1.0], cycle = 4 }] },
+  ] },
+  { label = "the colours cover the whole wheel (hue swings through 360 degrees)", any = [
+    { exprs = [{ type = "img.hsv_adjust", param = "hue", span = 360 }] },
+  ] },
+  { label = "the sparkles show (the sparkles are the top layer, or they are added on)", any = [
+    { inputs = [{ type = "img.composite", input = "a", from = "img.tile|img.shape" }] },
+    { params = [{ type = "img.composite", name = "operation", any_of = ["add", "screen", "maximum"] }] },
+  ] },
+]
+
+# ---- Long change requests ----------------------------------------------------
+
+[[prompt]]
+id = "x-show-six-changes"
+text = """This is my show patch. Make exactly these six changes and nothing else. One: the background kaleidoscope gets ten segments instead of six. Two: the title text turns red. Three: the pulse that brightens the grade should swell once every 8 seconds instead of every 4, keeping its depth. Four: add a second output window titled Backup, 1280 by 720 pixels, showing exactly the final picture. Five: the blur on the spinning ring becomes 30 pixels, and the little accent dot's blur stays as it is. Six: put a glow on the final picture, so both windows show it. Everything I built must stay, including bg_fold, ring_blur, layer_mix, trail_mem, trail_fade, look_switch, grade_level, title_text, pulse and main_out."""
+seed = "docs/milestones/m5/expert/seeds/x-show-six-changes.lasair"
+keep = ["bg_fold", "ring_blur", "trail_fade", "look_switch", "title_text", "main_out"]
+min_nodes = 34
+max_nodes = 37
+animated = true
+paths = [
+  "img.noise > img.kaleidoscope > img.hsv_adjust > img.blur > img.level > img.composite > img.composite > img.edge > img.level > img.composite > img.feedback",
+  "img.shape > img.tile > img.transform > img.blur > img.composite",
+  "img.composite > img.switch > img.hsv_adjust > img.level > img.text",
+]
+params = [
+  { type = "img.kaleidoscope", name = "segments", eq = 10 },
+  { type = "img.blur", name = "size", eq = 30 },
+  # The accent dot's blur, the trail fade and the ring's tiling were not asked about.
+  { type = "img.blur", name = "size", eq = 3 },
+  { type = "img.level", name = "brightness", eq = 0.92 },
+  { type = "img.tile", name = "repeat", eq = [3, 3] },
+  { type = "img.noise", name = "scale", eq = 3 },
+  { type = "img.switch", name = "blend", eq = true },
+]
+exprs = [
+  # The pulse: one swell per 8 s, the same depth (0.6 to 1.0).
+  { type = "img.level", param = "brightness", bind = true, from = "sig.lfo", period = 8, range = [0.6, 1.0] },
+  # The look switch still loops every 8 s.
+  { type = "img.switch", param = "index", period = 8 },
+]
+either = [
+  { label = "the title is red", any = [
+    { params = [
+        { type = "img.text", name = "colour", component = 0, min = 0.9 },
+        { type = "img.text", name = "colour", component = 1, max = 0.15 },
+        { type = "img.text", name = "colour", component = 2, max = 0.15 },
+      ] },
+  ] },
+  { label = "the Backup window is 1280 x 720 (width and height, or window_size)", any = [
+    { params = [
+        { type = "cmp.window", name = "width", eq = 1280 },
+        { type = "cmp.window", name = "height", eq = 720 },
+      ] },
+    { params = [{ type = "cmp.window", name = "window_size", eq = [1280, 720] }] },
+  ] },
+  { label = "a glow on the final picture (a Bloom after the title or just before it, feeding the windows)", any = [
+    { paths = ["img.text > img.bloom > cmp.window"] },
+    { paths = ["img.bloom > img.text > cmp.window"] },
+  ] },
+]
+wired = [{ type = "cmp.window", title_contains = "backup", from = "img.text" }]
+count = [
+  { type = "cmp.window", min = 2, max = 2 },
+  { type = "img.bloom", min = 1, max = 2 },
+]
+
+[[prompt]]
+id = "x-show-sections-edit"
+text = """Here is my show patch. Please make these six edits and leave every other part of it alone. One: the title should read TONIGHT instead of SOUNDCHECK. Two: the look switch goes through its looks over one clock cycle, 8 seconds; make that loop 5 seconds long, still going through all the looks. Three: mirror the spinning ring section so its left half is reflected onto the right. Four: the trails should fade faster than now, but still leave a visible trail. Five: drop all the colour from the very final picture, after the title. Six: the vignette darkens the edges to black, let it only darken them to mid-grey instead. Keep all my named nodes, including bg_fold, ring_blur, layer_mix, trail_mem, trail_fade, vignette, look_switch, grade_level, title_text, pulse, clock and main_out."""
+seed = "docs/milestones/m5/expert/seeds/x-show-sections-edit.lasair"
+keep = ["ring_blur", "trail_fade", "vignette", "look_switch", "title_text", "main_out"]
+min_nodes = 34
+max_nodes = 37
+animated = true
+paths = [
+  "img.noise > img.kaleidoscope > img.hsv_adjust > img.blur > img.level > img.composite > img.composite > img.edge > img.level > img.composite > img.feedback",
+  "img.shape > img.tile > img.transform > img.blur > img.composite",
+  "img.text > img.hsv_adjust > cmp.window",
+]
+params = [
+  { type = "img.text", name = "text", eq = "TONIGHT" },
+  { type = "img.hsv_adjust", name = "saturation", eq = 0 },
+  { type = "img.kaleidoscope", name = "segments", eq = 8 },
+  { type = "img.blur", name = "size", eq = 6 },
+  { type = "img.tile", name = "repeat", eq = [2, 2] },
+  { type = "img.noise", name = "scale", eq = 5 },
+  # Faster fade, still a trail.
+  { type = "img.level", name = "brightness", min = 0.5, max = 0.93 },
+  # The vignette's centre colour stays white.
+  { type = "img.ramp", name = "colour_a", eq = [1, 1, 1, 1] },
+]
+exprs = [
+  # The pulse was not asked about: one swell per 4 s, 0.6 to 1.0.
+  { type = "img.level", param = "brightness", bind = true, from = "sig.lfo", period = 4, range = [0.6, 1.0] },
+  # The switch walks through all its looks (0 to 2) over a 5 s loop.
+  { type = "img.switch", param = "index", period = 5, at = [[0.0, 0], [2.5, 1], [4.9, 1.9, 2.0]] },
+]
+either = [
+  { label = "the ring is mirrored left to right (a Mirror in the ring chain)", any = [
+    { paths = ["img.tile > img.mirror"], params = [{ type = "img.mirror", name = "axis", eq = "left_to_right" }] },
+    { paths = ["img.mirror > img.tile"], params = [{ type = "img.mirror", name = "axis", eq = "left_to_right" }] },
+  ] },
+  { label = "the vignette only darkens to mid-grey (its edge colour is about 0.5)", any = [
+    { params = [
+        { type = "img.ramp", name = "colour_b", component = 0, min = 0.4, max = 0.6 },
+        { type = "img.ramp", name = "colour_b", component = 1, min = 0.4, max = 0.6 },
+        { type = "img.ramp", name = "colour_b", component = 2, min = 0.4, max = 0.6 },
+      ] },
+  ] },
+]
+count = [{ type = "img.mirror", min = 1, max = 1 }]
+
+# ---- Exact mappings ----------------------------------------------------------
+
+[[prompt]]
+id = "x-orbit-dot"
+text = """Make a small white dot, about a tenth of the picture high, travel in a perfect circle around the middle of the picture: it swings 0.3 of the picture out to each side and up and down, makes one full lap every 8 seconds, counter-clockwise, and passes the right-hand side (3 o'clock) at the very start. Drive the two directions from signals a quarter of a cycle apart rather than typing a formula for each. Leave a fading tail behind the dot so the lap shows, and show it in one output window."""
+require = ["img.shape", "img.feedback", "cmp.window"]
+min_nodes = 5
+animated = true
+paths = [
+  "img.shape > img.feedback",
+  "img.feedback > img.level|img.transform|img.blend|img.composite|img.mixer|img.hsv_adjust > img.feedback",
+  "img.feedback > cmp.window|img.composite|img.blend|img.mixer",
+]
+params = [
+  { type = "img.shape", name = "shape", eq = "circle" },
+  { type = "img.shape", name = "size", min = 0.05, max = 0.15 },
+  { type = "img.shape", name = "fill", component = 0, min = 0.9 },
+  { type = "img.shape", name = "fill", component = 2, min = 0.9 },
+]
+count = [{ type = "cmp.window", min = 1, max = 1 }]
+either = [
+  { label = "the tail fades (a Level brightness, an HSV Adjust value, a Blend mix or a Composite opacity between 0.5 and 0.98)", any = [
+    { params = [{ type = "img.level", name = "brightness", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.hsv_adjust", name = "value", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.blend", name = "mix", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.composite", name = "opacity", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.level", name = "opacity", min = 0.5, max = 0.98 }] },
+  ] },
+  { label = "the dot is at the right at the start and goes round counter-clockwise (the Shape's centre moves through 0.8,0.5 / 0.5,0.8 / 0.2,0.5 / 0.5,0.2 at 0, 2, 4 and 6 s)", any = [
+    { exprs = [
+        { type = "img.shape", param = "centre", component = 0, at = [[0, 0.8], [1, 0.712], [2, 0.5], [3, 0.288], [4, 0.2], [5, 0.288], [6, 0.5], [7, 0.712], [8, 0.8]] },
+        { type = "img.shape", param = "centre", component = 1, at = [[0, 0.5], [1, 0.712], [2, 0.8], [3, 0.712], [4, 0.5], [5, 0.288], [6, 0.2], [7, 0.288], [8, 0.5]] },
+      ] },
+    { exprs = [
+        { type = "img.transform", param = "translate", component = 0, at = [[0, 0.3], [1, 0.212], [2, 0], [3, -0.212], [4, -0.3], [5, -0.212], [6, 0], [7, 0.212], [8, 0.3]] },
+        { type = "img.transform", param = "translate", component = 1, at = [[0, 0], [1, 0.212], [2, 0.3], [3, 0.212], [4, 0], [5, -0.212], [6, -0.3], [7, -0.212], [8, 0]] },
+      ] },
+    { params = [{ type = "img.shape", name = "centre", eq = [0.8, 0.5] }], exprs = [
+        { type = "img.transform", param = "rotate", wrap = 360, at = [[0, 0], [1, 45], [2, 90], [3, 135], [4, 180], [5, 225], [6, 270], [7, 315], [8, 0]] },
+      ] },
+  ] },
+]
+
+[[prompt]]
+id = "x-beat-flash"
+text = """A club visual at 126 BPM: slowly moving clouds that flash on every beat, at full brightness exactly on the beat and falling to a quarter of that or less before the next beat. The colours should also turn once through the whole colour wheel every 16 beats, forwards and smoothly. And the clouds should breathe: a zoom that starts at 1 on a beat, reaches 1.5 after 4 beats and is back to 1 after 8 beats, repeating. Show it in one window."""
+require = ["img.noise", "img.hsv_adjust", "img.transform", "cmp.window"]
+min_nodes = 5
+animated = true
+count = [{ type = "cmp.window", min = 1, max = 1 }]
+exprs = [
+  { type = "img.noise", param = "z", time_ok = true },
+  # The colour wheel: 22.5 degrees a beat, 360 every 16 beats.
+  { type = "img.hsv_adjust", param = "hue", wrap = 360, fallback = "sig.beat", at = [[1.914286, 90], [3.819048, 180]] },
+  { type = "img.hsv_adjust", param = "hue", wrap = 360, fallback = "sig.beat", at = [[5.72381, 270], [9.533333, 90]] },
+  # The breath: zoom 1 at beats 0 and 8, 1.5 at beats 4 and 12.
+  { type = "img.transform", param = "scale", fallback = "sig.beat", at = [[0.009524, 1.0], [3.819048, 1.0]] },
+  { type = "img.transform", param = "scale", fallback = "sig.beat", at = [[1.914286, 1.5], [5.72381, 1.5]] },
+]
+either = [
+  { label = "bright on the beat at 126 BPM (full brightness just after a beat, 0.476 s apart)", any = [
+    { exprs = [{ type = "img.level|img.hsv_adjust|img.composite|img.blend|img.mixer", at = [[0.01, 0.9, 99], [0.48619, 0.9, 99], [1.438571, 0.9, 99]] }] },
+    { params = [{ type = "sig.beat", name = "bpm", eq = 126 }], exprs = [{ type = "img.level|img.composite|img.blend|img.mixer", fallback = "sig.beat", at = [[0.01, 0.9, 99], [0.48619, 0.9, 99], [1.438571, 0.9, 99]] }] },
+    { params = [{ type = "sig.beat", name = "bpm", eq = 126 }], exprs = [{ type = "img.hsv_adjust", param = "value", fallback = "sig.beat", at = [[0.01, 0.9, 99], [0.48619, 0.9, 99], [1.438571, 0.9, 99]] }] },
+  ] },
+  { label = "dark before the next beat at 126 BPM (a quarter or less shortly before the next beat)", any = [
+    { exprs = [{ type = "img.level|img.hsv_adjust|img.composite|img.blend|img.mixer", at = [[0.43, 0, 0.28], [0.90619, 0, 0.28], [1.858571, 0, 0.28]] }] },
+    { params = [{ type = "sig.beat", name = "bpm", eq = 126 }], exprs = [{ type = "img.level|img.composite|img.blend|img.mixer", fallback = "sig.beat", at = [[0.43, 0, 0.28], [0.90619, 0, 0.28], [1.858571, 0, 0.28]] }] },
+    { params = [{ type = "sig.beat", name = "bpm", eq = 126 }], exprs = [{ type = "img.hsv_adjust", param = "value", fallback = "sig.beat", at = [[0.43, 0, 0.28], [0.90619, 0, 0.28], [1.858571, 0, 0.28]] }] },
+  ] },
+]
+
+# ---- Economy -------------------------------------------------------------------
+
+[[prompt]]
+id = "x-economy-mandala"
+text = """A bold triangle folded into a twelve-way mirror mandala that turns once a minute, coloured by a gradient from deep teal (dark, blue-green) to gold, shown in one output window. Use no more than five nodes in the whole patch."""
+require = ["img.shape", "img.kaleidoscope", "img.ramp", "cmp.window"]
+min_nodes = 5
+max_nodes = 5
+animated = true
+paths = ["img.ramp > img.lookup|img.composite|img.blend|img.mixer"]
+params = [
+  { type = "img.shape", name = "shape", eq = "polygon" },
+  { type = "img.shape", name = "sides", eq = 3 },
+  { type = "img.kaleidoscope", name = "segments", eq = 12 },
+  # Deep teal: little red, blue-green; gold: strong red, some green, little blue.
+  { type = "img.ramp", name = "colour_a", component = 0, max = 0.2 },
+  { type = "img.ramp", name = "colour_a", component = 2, min = 0.1 },
+  { type = "img.ramp", name = "colour_b", component = 0, min = 0.8 },
+  { type = "img.ramp", name = "colour_b", component = 2, max = 0.4 },
+]
+count = [{ type = "cmp.window", min = 1, max = 1 }]
+either = [{ label = "the gradient colours the folded triangle (colour then fold, or fold then colour)", any = [
+  { paths = ["img.shape > img.kaleidoscope > img.lookup|img.composite|img.blend|img.mixer > cmp.window"] },
+  { paths = ["img.shape > img.lookup|img.composite|img.blend|img.mixer > img.kaleidoscope > cmp.window"] },
+] }, { label = "it turns once a minute (6 degrees a second on the kaleidoscope rotation or on the shape)", any = [
+  { exprs = [{ type = "img.kaleidoscope", param = "rotation", rate = [5, 7] }] },
+  { exprs = [{ type = "img.shape", param = "rotate", rate = [5, 7] }] },
+] }]
+
+[[prompt]]
+id = "x-economy-comet"
+text = """A bright round dot a little off to one side of the middle, pulsing in size, that leaves a long fading tail which slowly swirls outwards as it dies away. Show it in one output window. Use no more than five nodes in the whole patch."""
+require = ["img.shape", "img.feedback", "img.transform", "cmp.window"]
+min_nodes = 5
+max_nodes = 5
+animated = true
+paths = [
+  "img.shape > img.feedback",
+  "img.feedback > img.transform > img.blend|img.composite|img.mixer > img.feedback",
+  "img.blend|img.composite|img.mixer > cmp.window",
+]
+params = [
+  { type = "img.shape", name = "shape", eq = "circle" },
+  # The tail swirls outwards: a turn and a zoom per pass.
+  { type = "img.transform", name = "scale", component = 0, min = 1.001 },
+]
+exprs = [{ type = "img.shape", param = "size", time_ok = true }]
+count = [{ type = "cmp.window", min = 1, max = 1 }]
+either = [
+  { label = "the tail fades (a Blend mix or a Composite opacity between 0.5 and 0.98, or a Level / HSV Adjust fade)", any = [
+    { params = [{ type = "img.blend", name = "mix", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.composite", name = "opacity", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.level", name = "brightness", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.hsv_adjust", name = "value", min = 0.5, max = 0.98 }] },
+    { params = [{ type = "img.level", name = "opacity", min = 0.5, max = 0.98 }] },
+  ] },
+  { label = "the tail turns (the transform rotates a little each pass)", any = [
+    { params = [{ type = "img.transform", name = "rotate", min = 0.1 }] },
+    { params = [{ type = "img.transform", name = "rotate", max = -0.1 }] },
+  ] },
+  { label = "the dot is off to one side of the middle", any = [
+    { params = [{ type = "img.shape", name = "centre", component = 0, min = 0.6 }] },
+    { params = [{ type = "img.shape", name = "centre", component = 0, max = 0.4 }] },
+    { params = [{ type = "img.shape", name = "centre", component = 1, min = 0.6 }] },
+    { params = [{ type = "img.shape", name = "centre", component = 1, max = 0.4 }] },
+  ] },
+]

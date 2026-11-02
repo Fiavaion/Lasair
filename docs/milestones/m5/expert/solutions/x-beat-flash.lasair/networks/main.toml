@@ -1,0 +1,48 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 6
+
+[[node]]
+id = 0
+name = "clock"
+type = "sig.beat"
+pos = [0.0, 0.0]
+params.bpm = 126.0
+
+[[node]]
+id = 1
+name = "clouds"
+type = "img.noise"
+pos = [220.0, 0.0]
+params.z = { value = 0.0, expr = "time * 0.2" }
+
+[[node]]
+id = 2
+name = "zoom"
+type = "img.transform"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.scale = { value = [1.0, 1.0], expr = "1.25 - 0.25 * cos(time * 126 / 60 / 8 * tau)" }
+
+[[node]]
+id = 3
+name = "wheel"
+type = "img.hsv_adjust"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.hue = { value = 0.0, expr = "time * 126 / 60 / 16 * 360" }
+
+[[node]]
+id = 4
+name = "flash"
+type = "img.level"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.brightness = { value = 1.0, expr = "1 - op('clock')['beat_phase']" }
+
+[[node]]
+id = 5
+name = "main_out"
+type = "cmp.window"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }

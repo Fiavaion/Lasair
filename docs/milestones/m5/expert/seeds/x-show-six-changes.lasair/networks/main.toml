@@ -1,0 +1,289 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 34
+
+[[node]]
+id = 0
+name = "bg_clouds"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.scale = 3.0
+params.z = { value = 0.0, expr = "time * 0.1" }
+
+[[node]]
+id = 1
+name = "bg_fold"
+type = "img.kaleidoscope"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.segments = 6
+
+[[node]]
+id = 2
+name = "bg_hue"
+type = "img.hsv_adjust"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.hue = { value = 0.0, bind = { node = 32 } }
+
+[[node]]
+id = 3
+name = "bg_soft"
+type = "img.blur"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.size = 1.5
+
+[[node]]
+id = 4
+name = "bg_level"
+type = "img.level"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.brightness = 1.0
+
+[[node]]
+id = 5
+name = "bg_grain"
+type = "img.noise"
+pos = [1100.0, 0.0]
+params.amplitude = 0.05
+params.scale = 40.0
+params.z = { value = 0.0, expr = "time * 3" }
+
+[[node]]
+id = 6
+name = "bg_grain_mix"
+type = "img.composite"
+pos = [1320.0, 0.0]
+inputs.a = { node = 5, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 7
+name = "ring_shape"
+type = "img.shape"
+pos = [1540.0, 0.0]
+params.shape = "polygon"
+params.sides = 8
+params.size = [0.2, 0.2]
+
+[[node]]
+id = 8
+name = "ring_tile"
+type = "img.tile"
+pos = [0.0, 140.0]
+inputs.in = { node = 7, output = "out" }
+params.repeat = [3.0, 3.0]
+
+[[node]]
+id = 9
+name = "ring_spin"
+type = "img.transform"
+pos = [220.0, 140.0]
+inputs.in = { node = 8, output = "out" }
+params.rotate = { value = 0.0, expr = "time * 10" }
+
+[[node]]
+id = 10
+name = "ring_blur"
+type = "img.blur"
+pos = [440.0, 140.0]
+inputs.in = { node = 9, output = "out" }
+params.size = 12.0
+
+[[node]]
+id = 11
+name = "accent_shape"
+type = "img.shape"
+pos = [660.0, 140.0]
+params.shape = "circle"
+params.size = [0.06, 0.06]
+
+[[node]]
+id = 12
+name = "accent_blur"
+type = "img.blur"
+pos = [880.0, 140.0]
+inputs.in = { node = 11, output = "out" }
+params.size = 3.0
+
+[[node]]
+id = 13
+name = "layer_mix"
+type = "img.composite"
+pos = [1100.0, 140.0]
+inputs.a = { node = 10, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 14
+name = "accent_comp"
+type = "img.composite"
+pos = [1320.0, 140.0]
+inputs.a = { node = 12, output = "out" }
+inputs.b = { node = 13, output = "out" }
+params.operation = "screen"
+
+[[node]]
+id = 15
+name = "edge_detect"
+type = "img.edge"
+pos = [1540.0, 140.0]
+inputs.in = { node = 14, output = "out" }
+params.strength = 1.0
+
+[[node]]
+id = 16
+name = "edge_level"
+type = "img.level"
+pos = [0.0, 280.0]
+inputs.in = { node = 15, output = "out" }
+params.brightness = 0.4
+
+[[node]]
+id = 17
+name = "edge_mix"
+type = "img.composite"
+pos = [220.0, 280.0]
+inputs.a = { node = 16, output = "out" }
+inputs.b = { node = 14, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 18
+name = "trail_mem"
+type = "img.feedback"
+pos = [440.0, 280.0]
+inputs.in = { node = 17, output = "out" }
+inputs.loop = { node = 21, output = "out" }
+
+[[node]]
+id = 19
+name = "trail_move"
+type = "img.transform"
+pos = [660.0, 280.0]
+inputs.in = { node = 18, output = "out" }
+params.scale = [1.01, 1.01]
+
+[[node]]
+id = 20
+name = "trail_fade"
+type = "img.level"
+pos = [880.0, 280.0]
+inputs.in = { node = 19, output = "out" }
+params.brightness = 0.92
+
+[[node]]
+id = 21
+name = "trail_add"
+type = "img.composite"
+pos = [1100.0, 280.0]
+inputs.a = { node = 17, output = "out" }
+inputs.b = { node = 20, output = "out" }
+params.operation = "maximum"
+
+[[node]]
+id = 22
+name = "vignette"
+type = "img.ramp"
+pos = [1320.0, 280.0]
+params.colour_a = [1.0, 1.0, 1.0, 1.0]
+params.colour_b = [0.0, 0.0, 0.0, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 23
+name = "vignette_mix"
+type = "img.composite"
+pos = [1540.0, 280.0]
+inputs.a = { node = 21, output = "out" }
+inputs.b = { node = 22, output = "out" }
+params.operation = "multiply"
+
+[[node]]
+id = 24
+name = "look_noise"
+type = "img.noise"
+pos = [0.0, 420.0]
+params.scale = 9.0
+params.z = { value = 0.0, expr = "time * 0.2" }
+
+[[node]]
+id = 25
+name = "look_ramp"
+type = "img.ramp"
+pos = [220.0, 420.0]
+params.colour_a = [0.0, 0.1, 0.3, 1.0]
+params.colour_b = [1.0, 0.5, 0.0, 1.0]
+
+[[node]]
+id = 26
+name = "look_switch"
+type = "img.switch"
+pos = [440.0, 420.0]
+inputs.in0 = { node = 23, output = "out" }
+inputs.in1 = { node = 24, output = "out" }
+inputs.in2 = { node = 25, output = "out" }
+params.blend = true
+params.index = { value = 0.0, expr = "op('clock')['seconds'] / 8 * 2" }
+
+[[node]]
+id = 27
+name = "grade_hsv"
+type = "img.hsv_adjust"
+pos = [660.0, 420.0]
+inputs.in = { node = 26, output = "out" }
+params.saturation = 1.1
+
+[[node]]
+id = 28
+name = "grade_level"
+type = "img.level"
+pos = [880.0, 420.0]
+inputs.in = { node = 27, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 31 } }
+
+[[node]]
+id = 29
+name = "title_text"
+type = "img.text"
+pos = [1100.0, 420.0]
+inputs.in = { node = 28, output = "out" }
+params.colour = [1.0, 1.0, 1.0, 1.0]
+params.size = 0.12
+params.text = "SOUNDCHECK"
+
+[[node]]
+id = 30
+name = "main_out"
+type = "cmp.window"
+pos = [1320.0, 420.0]
+inputs.in = { node = 29, output = "out" }
+params.title = "Main"
+
+[[node]]
+id = 31
+name = "pulse"
+type = "sig.lfo"
+pos = [1540.0, 420.0]
+params.amplitude = 0.2
+params.frequency = 0.25
+params.offset = 0.8
+
+[[node]]
+id = 32
+name = "drift"
+type = "sig.noise"
+pos = [0.0, 560.0]
+params.amplitude = 60.0
+params.frequency = 0.1
+
+[[node]]
+id = 33
+name = "clock"
+type = "sig.timer"
+pos = [220.0, 560.0]
+params.length = 8.0

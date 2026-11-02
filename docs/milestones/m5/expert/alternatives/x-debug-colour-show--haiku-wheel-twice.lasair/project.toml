@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Colour show with four faults"
+description = "Seed for x-debug-colour-show."
+resolution = [1280, 720]

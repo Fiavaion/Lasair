@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Logo with four faults"
+description = "Seed for x-debug-logo-wobble."
+resolution = [1280, 720]

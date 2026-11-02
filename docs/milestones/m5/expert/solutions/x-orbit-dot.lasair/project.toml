@@ -1,0 +1,5 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Orbiting dot"
+description = "Reference solution for x-orbit-dot."
+resolution = [1280, 720]

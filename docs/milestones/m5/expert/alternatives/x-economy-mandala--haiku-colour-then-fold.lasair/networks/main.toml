@@ -1,0 +1,49 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "grad"
+type = "img.ramp"
+pos = [0.0, 0.0]
+params.colour_a = [0.0, 0.32, 0.32, 1.0]
+params.colour_b = [0.9, 0.68, 0.2, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 1
+name = "tri"
+type = "img.shape"
+pos = [220.0, 0.0]
+params.background = [0.0, 0.0, 0.0, 1.0]
+params.shape = "polygon"
+params.sides = 3
+params.size = [0.7, 0.7]
+params.softness = 0.002
+
+[[node]]
+id = 2
+name = "mul"
+type = "img.composite"
+pos = [440.0, 0.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.operation = "multiply"
+
+[[node]]
+id = 3
+name = "kal"
+type = "img.kaleidoscope"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.rotation = { value = 0.0, expr = "time * 6" }
+params.segments = 12
+
+[[node]]
+id = 4
+name = "window"
+type = "cmp.window"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.title = "Mandala"

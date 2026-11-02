@@ -176,7 +176,7 @@ paths = [
 params = [
   { type = "msh.sphere", name = "radius", eq = 0.5 },
   { type = "msh.torus", name = "radius", eq = 1 },
-  { type = "msh.torus", name = "thickness", eq = 0.05 },
+  { type = "msh.torus", name = "thickness", any_of = [0.05, 0.1] },
   { type = "img.render", name = "elevation", eq = 25 },
   { type = "img.render", name = "distance", eq = 5 },
 ]

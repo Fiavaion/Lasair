@@ -60,6 +60,10 @@ impl Ollama {
     }
 }
 
+/// How long a model may take to answer one request: a 4k-token reply from a
+/// dense 27B model on a shared server takes about six minutes.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(900);
+
 pub(crate) fn post_json(
     url: &str,
     headers: &[(&str, &str)],
@@ -80,8 +84,8 @@ pub(crate) fn post_json(
     let mut req = agent
         .post(url)
         .config()
-        .timeout_global(Some(Duration::from_secs(300)))
-        .timeout_recv_response(Some(Duration::from_secs(300)))
+        .timeout_global(Some(REPLY_TIMEOUT))
+        .timeout_recv_response(Some(REPLY_TIMEOUT))
         .build()
         .header("content-type", "application/json");
     for (k, v) in headers {
@@ -309,11 +313,48 @@ impl OpenAiCompat {
         if let Some(a) = &auth {
             headers.push(("authorization", a));
         }
-        let r = post_json(&self.url(), &headers, body)?;
+        let started = std::time::Instant::now();
+        let r = post_json(&self.url(), &headers, body);
+        log_request(&self.model, body, r.as_ref(), started.elapsed());
+        let r = r?;
         if let Some(e) = r.get("error") {
             return Err(format!("OpenAI-compatible server: {e}"));
         }
         Ok(r)
+    }
+}
+
+/// With `LSR_LLM_LOG` set to a file path, appends one JSON line per request
+/// (time, model, thinking setting, tokens, seconds, tokens/s, finish reason,
+/// error) so a benchmark on a shared server keeps its speed evidence. Never
+/// the key or the messages.
+fn log_request(model: &str, body: &Value, r: Result<&Value, &String>, took: Duration) {
+    let Some(path) = std::env::var_os("LSR_LLM_LOG") else {
+        return;
+    };
+    let secs = took.as_secs_f64();
+    let usage = r.ok().and_then(|v| v.get("usage"));
+    let out = usage.and_then(|u| u["completion_tokens"].as_u64());
+    let line = json!({
+        "at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+        "model": model,
+        "enable_thinking": body["chat_template_kwargs"]["enable_thinking"],
+        "json_mode": body.get("response_format").is_some(),
+        "max_tokens": body["max_tokens"],
+        "prompt_tokens": usage.and_then(|u| u["prompt_tokens"].as_u64()),
+        "completion_tokens": out,
+        "secs": (secs * 100.0).round() / 100.0,
+        "tokens_per_s": out.map(|n| (n as f64 / secs.max(1e-3) * 10.0).round() / 10.0),
+        "finish_reason": r.ok().and_then(|v| v["choices"][0]["finish_reason"].as_str()),
+        "error": match r { Err(e) => Some(e.as_str()), Ok(v) => v.get("error").and_then(|e| e.as_str()) },
+    });
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{line}");
     }
 }
 

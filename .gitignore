@@ -22,3 +22,6 @@ __pycache__/
 
 # Installer output (packaging/)
 /dist/
+
+# Local secrets (API keys); see .env.example
+.env

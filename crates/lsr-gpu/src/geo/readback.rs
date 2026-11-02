@@ -111,23 +111,29 @@ impl Readback {
         if !self.is_ready() {
             return Ok(false);
         }
-        let failed = self.failed.load(Ordering::SeqCst) > 0;
+        self.started = false;
+        if self.failed.load(Ordering::SeqCst) > 0 {
+            // The buffers whose mapping failed are not mapped and the others
+            // are: none can be unmapped safely, so none goes back to the pool.
+            for (_, staging) in self.items.drain(..) {
+                staging.discard();
+            }
+            return Err("mapping a readback buffer failed".into());
+        }
+        // Every buffer is mapped: each is unmapped before it goes back to
+        // the pool, even when reading one fails.
+        let mut error = None;
         for (attr, staging) in self.items.drain(..) {
-            if !failed {
-                let mapped = staged_bytes(&attr);
-                let data = staging
-                    .slice(..mapped)
-                    .get_mapped_range()
-                    .map_err(|e| e.to_string())?;
-                attr.set_cpu_copy(data[..attr.bytes() as usize].into());
+            match staging.slice(..staged_bytes(&attr)).get_mapped_range() {
+                Ok(data) => attr.set_cpu_copy(data[..attr.bytes() as usize].into()),
+                Err(e) => error = Some(e.to_string()),
             }
             staging.unmap();
         }
-        self.started = false;
-        if failed {
-            return Err("mapping a readback buffer failed".into());
+        match error {
+            Some(e) => Err(e),
+            None => Ok(true),
         }
-        Ok(true)
     }
 
     /// Like [`Self::receive`], but instead of copying the values on this
@@ -154,12 +160,26 @@ impl Readback {
         self.started = false;
         let items = std::mem::take(&mut self.items);
         if self.failed.load(Ordering::SeqCst) > 0 {
-            for (_, staging) in &items {
-                staging.unmap();
+            // As in `receive`: some are mapped, some are not.
+            for (_, staging) in items {
+                staging.discard();
             }
             return Err("mapping a readback buffer failed".into());
         }
         Ok(Some(Mapped { items }))
+    }
+}
+
+impl Drop for Readback {
+    fn drop(&mut self) {
+        // Dropped mid-readback (its operator went away, e.g. the network was
+        // replaced): the staging buffers may be mapped or still mapping, so
+        // none goes back to the pool, where the next copy into it would fail.
+        if self.started {
+            for (_, staging) in self.items.drain(..) {
+                staging.discard();
+            }
+        }
     }
 }
 

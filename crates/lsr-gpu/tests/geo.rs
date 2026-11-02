@@ -507,3 +507,38 @@ fn missing_geo_implementations_and_offline_mode() {
     assert_eq!(offline, [5.0, 6.0, 7.0, 8.0]);
     assert_eq!(run(CookMode::Live), offline);
 }
+
+/// A readback dropped while its staging buffers are mapping or mapped (an
+/// MSH operator removed mid-readback, as when the assistant replaces the
+/// network) must not leave a mapped buffer in the pool: the next readback of
+/// the same size reused it and the submit failed validation ("Buffer with
+/// 'lsr-geo' label is still mapped"), which panicked the app.
+#[test]
+fn a_readback_dropped_mid_flight_leaves_no_mapped_buffer_in_the_pool() {
+    let Some((device, queue)) = gpu() else { return };
+    let pool = lsr_gpu::geo::BufferPool::new(device.clone());
+    let attr = |v: f32| {
+        let a = Attribute::from_f32("v", &[v; 64]);
+        let gpu = Attribute::gpu("v", a.ty(), 64, pool.attr(a.bytes()));
+        queue.write_buffer(gpu.gpu_buffer().unwrap(), 0, a.cpu_bytes().unwrap());
+        gpu
+    };
+    // Dropped while still mapping, then once mapped.
+    for wait in [false, true] {
+        let mut rb = readback::Readback::new();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        rb.record(&mut encoder, &pool, &attr(1.0));
+        queue.submit([encoder.finish()]);
+        rb.start();
+        if wait {
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+        drop(rb);
+        pool.end_frame();
+        // The next readback of the same size class copies into a pooled
+        // staging buffer and submits.
+        let bytes = readback::read_blocking(&device, &queue, &pool, &attr(2.0)).unwrap();
+        assert_eq!(&bytes[..4], &2.0f32.to_le_bytes());
+        pool.end_frame();
+    }
+}

@@ -93,6 +93,15 @@ impl GeoBuffer {
     pub fn size(&self) -> u64 {
         self.buffer.size()
     }
+
+    /// Drops the buffer without handing it back to its pool. For a buffer
+    /// that may still be mapped or mapping: the pool must hold only unmapped
+    /// buffers (the next submit that writes a mapped one fails validation),
+    /// and unmapping one that is not mapped is itself an error. Rare paths
+    /// only; the pool makes a new buffer in its place.
+    pub fn discard(mut self) {
+        self.home = None;
+    }
 }
 
 impl std::ops::Deref for GeoBuffer {

@@ -3,6 +3,7 @@
 //! M0 measures start-up costs only. Each milestone adds the PT-n cases it is
 //! accountable for; results are compared across runs by case `id`.
 
+mod msh;
 mod splat;
 
 use std::path::Path;
@@ -360,6 +361,115 @@ fn pt2(gpu: &GpuContext) -> anyhow::Result<Case> {
         ms: Some(p50),
         note: Some(format!(
             "2M particles (curl noise, attract, age), 2-px additive sprites at {w}×{h}, {} frames: p50 {p50:.2} ms ({:.1} fps), p95 {p95:.2} ms, max {max:.2} ms{split}; no buffers, bind groups or textures created after warm-up; target p95 ≤ 16.7 ms on RTX 4070{}",
+            frames.len(),
+            1000.0 / p50,
+            if software { " (software adapter)" } else { "" }
+        )),
+    })
+}
+
+/// PT-5 (PRD §8), compositing half: 500k particles (the PT-2 system) drawn
+/// as 2-pixel additive sprites at 1920×1080, then composited over a ramp,
+/// blurred and levelled. Frame time includes GPU completion; the 1080p60
+/// target is p95 ≤ 16.7 ms and is judged on an Apple M-series chip (M2 Pro
+/// or better). The AI interactive tier (≥ 5 fps local) is not measured here.
+fn pt5(gpu: &GpuContext) -> anyhow::Result<Case> {
+    use lsr_core::graph::{Edit, Endpoint, Node, Param, Wire};
+    use lsr_gpu::engine::{Engine, EngineConfig, OpLibrary};
+    use serde_json::json;
+
+    let mut library = OpLibrary::default();
+    lsr_ops_pnt::library(&mut library);
+    lsr_ops_img::library(&mut library);
+    let (w, h) = (1920, 1080);
+    let mut engine = Engine::new(
+        gpu.device.clone(),
+        gpu.queue.clone(),
+        crate::builtin_registry(),
+        library,
+        EngineConfig {
+            width: w,
+            height: h,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        },
+    );
+    let ids: Vec<_> = (0..6).map(|_| engine.alloc_id()).collect();
+    let [sys, draw, ramp, comp, blur, out] = [ids[0], ids[1], ids[2], ids[3], ids[4], ids[5]];
+    let nodes = [
+        (sys, "pnt.particles"),
+        (draw, "img.render_points"),
+        (ramp, "img.ramp"),
+        (comp, "img.composite"),
+        (blur, "img.blur"),
+        (out, "img.level"),
+    ];
+    let mut edits: Vec<Edit> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (id, ty))| Edit::AddNode {
+            node: Node::new(*id, *ty, format!("n{i}")),
+        })
+        .collect();
+    for (src, dst, socket) in [
+        (sys, draw, "geo"),
+        (draw, comp, "a"),
+        (ramp, comp, "b"),
+        (comp, blur, "in"),
+        (blur, out, "in"),
+    ] {
+        edits.push(Edit::Connect {
+            wire: Wire::new(Endpoint::new(src, "out"), Endpoint::new(dst, socket)),
+        });
+    }
+    let params = [
+        (sys, "capacity", json!(500_000)),
+        (sys, "initial", json!(500_000)),
+        (sys, "rate", json!(125_000.0)),
+        (sys, "life", json!(4.0)),
+        (sys, "attract", json!(0.5)),
+        (draw, "intensity", json!(0.3)),
+        (draw, "height", json!(3.0)),
+        (ramp, "type", json!("radial")),
+    ];
+    for (node, param, value) in params {
+        edits.push(Edit::SetParam {
+            node,
+            param: param.into(),
+            value: Some(Param::constant(value)),
+        });
+    }
+    engine.edit("pt5", edits).context("building the patch")?;
+
+    let software = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+    let mut t = 0.0;
+    for _ in 0..if software { 3 } else { 60 } {
+        engine.cook(&[out], t)?;
+        let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
+        t += 1.0 / 60.0;
+    }
+    if let Some(e) = ids.iter().find_map(|id| engine.error(*id)) {
+        anyhow::bail!("a node failed: {e}");
+    }
+    let mut frames = Vec::new();
+    for _ in 0..if software { 3 } else { 300 } {
+        let (cooked, ms) = timed(|| {
+            let n = engine.cook(&[out], t);
+            let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
+            n
+        });
+        anyhow::ensure!(cooked? >= 2, "the particles and the chain cook every frame");
+        frames.push(ms);
+        t += 1.0 / 60.0;
+    }
+    frames.sort_by(f64::total_cmp);
+    let pct = |p: f64| frames[((frames.len() - 1) as f64 * p).round() as usize];
+    let (p50, p95, max) = (pct(0.5), pct(0.95), frames[frames.len() - 1]);
+    Ok(Case {
+        id: "pt5.composite_500k",
+        status: Status::Ok,
+        ms: Some(p95),
+        note: Some(format!(
+            "500k particles (curl noise, attract, age) as 2-px additive sprites, composited over a ramp, blurred and levelled at {w}×{h}, {} frames: p50 {p50:.2} ms ({:.1} fps), p95 {p95:.2} ms, max {max:.2} ms; target p95 ≤ 16.7 ms (1080p60) on Apple M-series (M2 Pro+); the AI interactive tier (≥ 5 fps local) is not measured here{}",
             frames.len(),
             1000.0 / p50,
             if software { " (software adapter)" } else { "" }
@@ -919,6 +1029,20 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
         note: Some(format!("{} operators registered", registry.len())),
     });
 
+    // PT-12 runs the MSH operators on the CPU, so it needs no GPU.
+    cases.push(msh::boolean_100k().unwrap_or_else(|err| Case {
+        id: "pt12.boolean_100k",
+        status: Status::Error,
+        ms: None,
+        note: Some(format!("{err:#}")),
+    }));
+    cases.push(msh::polyreduce_1m().unwrap_or_else(|err| Case {
+        id: "pt12.polyreduce_1m",
+        status: Status::Error,
+        ms: None,
+        note: Some(format!("{err:#}")),
+    }));
+
     if use_gpu {
         let (gpu, ms) = timed(GpuContext::headless);
         match gpu {
@@ -949,6 +1073,12 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                         note: Some(format!("{err:#}")),
                     },
                 });
+                cases.push(pt5(&gpu).unwrap_or_else(|err| Case {
+                    id: "pt5.composite_500k",
+                    status: Status::Error,
+                    ms: None,
+                    note: Some(format!("{err:#}")),
+                }));
                 cases.push(pt7_launch_cut(&gpu).unwrap_or_else(|err| Case {
                     id: "pt7.launch_cut",
                     status: Status::Error,

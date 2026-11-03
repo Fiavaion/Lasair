@@ -60,6 +60,9 @@ png = "0.18"
 # VAT In reads OpenEXR textures (BSD-3-Clause). 1.73: 1.74 pulls in `paste`
 # (RUSTSEC-2024-0436, unmaintained) through `pulp`.
 exr = { version = "~1.73", default-features = false }
+# Boolean (PRD A74): pure-Rust Manifold port (Apache-2.0). Pinned; the
+# `parallel` feature (rayon) stays off.
+manifold-rust = { version = "=0.19.2", default-features = false }
 zune-jpeg = "0.4"
 midir = "0.11"
 mdns-sd = { version = "0.21", default-features = false, features = ["logging"] }

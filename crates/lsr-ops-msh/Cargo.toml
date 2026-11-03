@@ -20,6 +20,8 @@ epaint_default_fonts.workspace = true
 # VAT In: position, rotation and colour textures.
 png.workspace = true
 exr.workspace = true
+# Boolean: the Manifold algorithm (PRD A74).
+manifold-rust.workspace = true
 
 [dev-dependencies]
 lsr-interop.workspace = true

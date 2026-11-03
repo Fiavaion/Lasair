@@ -25,8 +25,7 @@ yanked = "deny"
 [licenses]
 version = 2
 confidence-threshold = 0.93
-# Add licences here only when a dependency needs them (e.g. BSL-1.0 for
-# Clipper2 via Manifold, see docs/spikes/msh-licences.md).
+# Add licences here only when a dependency needs them.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -38,6 +37,12 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
 ]
+
+# Boost Software Licence (permissive, no attribution in binaries): clipper2-rust,
+# pulled in by manifold-rust for msh.boolean (PRD A74, docs/spikes/msh-licences.md).
+[[licenses.exceptions]]
+crate = "clipper2-rust"
+allow = ["BSL-1.0"]
 
 # Fonts bundled by egui (epaint_default_fonts): OFL for Hack/Noto/Emoji,
 # Ubuntu Font Licence for Ubuntu-Light. Both are permissive font licences.

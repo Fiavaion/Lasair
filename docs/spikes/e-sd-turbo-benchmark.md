@@ -73,7 +73,10 @@ U-Net 65 ms, TAESD decode 9.8 ms, download 1.3 ms. `channels_last` makes the MPS
   answers in ~2 ms.
 - Run-to-run variance between 2-step runs is large (direct 6.0 fps vs protocol 7.5 fps for the same
   work), probably GPU clocks and thermals. Treat the 2-step numbers as ±20 %.
-- **PT-5 is not met on torch MPS** (11 fps at 1 step). It needs Core ML (ANE/GPU, a converted U-Net)
+- Correction 2026-11-03: PT-5's AI tier is ≥ 5 fps, which this meets
+  (13.1 fps at 1 step through the protocol, re-measured; `docs/milestones/m6/pt.md`).
+  The line below was written against the real-time bar.
+- **Real-time (PT-3's 30 fps) is not met on torch MPS** (11 fps at 1 step). It needs Core ML (ANE/GPU, a converted U-Net)
   or a smaller/distilled U-Net. AC4's route (Mac → Windows/NVIDIA LAN host) is the M4 answer for
   real-time diffusion on a Mac.
 

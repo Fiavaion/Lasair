@@ -19,7 +19,7 @@
 - `manifold-csg-sys` runs `git clone` of Manifold at build time. That is not acceptable for reproducible or offline builds: vendor or fork the `-sys` crate, or prebuild and point `MANIFOLD_CSG_LIB_DIR` at the result.
 - TBB is on by default through the `parallel` feature. Its licence is fine, but decide whether its thread pool should run alongside our MSH worker threads.
 - Manifold `main` (unreleased) replaces Clipper2 with an in-tree backend.
-- `manifold-rust` 0.16.0 (Apache-2.0) is a pure-Rust port worth benchmarking against PT-12.
+- `manifold-rust` (Apache-2.0), a pure-Rust port, was benchmarked against PT-12 and adopted at 0.19.2 for `msh.boolean` (PRD A74, 2026-11-03): two 100k-triangle spheres in about 112 ms.
 
 **meshoptimizer**
 - Bump the vendored source to 1.3 with a small in-house `-sys` crate (or a patched `meshopt`).

@@ -1,0 +1,23 @@
+# Network-generation eval
+
+**Model:** `openai:Qwen3.6-35B-A3B-NVFP4` · **Assist:** full · **Retrieval:** semantic · **Prompts:** `docs/milestones/m5/eval-prompts-hard.toml` · **Valid:** 8/15 (**53%**) · **Score:** 199/233 points (**86%** mean per prompt) · **Time:** 610 s · **Max turns:** 40
+
+Valid = every check passes: at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it). The hard tier adds wiring paths, parameter values, expressions and bindings, node counts, kept nodes and seed projects (see `agent_check.rs`). Every check is one point; Score = points earned / points possible. A model error makes the run invalid but adds no point to the maximum.
+
+| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why | Score |
+|---|---|---|---|---|---|---|---|
+| h-tunnel-two-screens | **invalid** | 9 | cmp.window, img.blend, img.kaleidoscope, img.kernel, img.noise, img.transform, sig.lfo | 7/14 | 107 s | 9 nodes < 10; missing img.feedback; missing img.composite; missing img.hsv_adjust; missing img.bloom; no path img.noise > img.kaleidoscope > img.composite > cmp.window; no path img.noise > img.hsv_adjust > cmp.window; no path img.noise > img.bloom > cmp.window; no path img.feedback > img.transform > img.composite > img.feedback; no path img.feedback > img.level/img.hsv_adjust > img.feedback; img.hsv_adjust hue not driven as asked; not met in any accepted way: the trails fade (a Level brightness or an HSV Adjust value below 1) | 11/23 (48%) |
+| h-layered-stage | **invalid** | 9 | cmp.window, img.composite, img.mirror, img.noise, img.ramp, img.shape, sig.lfo | 5/6 | 41 s | missing img.tile; no path img.shape > img.tile; no img.tile.repeat = [3,3]; no img.noise.scale <= 3; not met in any accepted way: the three layers combined (two composites: add then multiply, or one mixer: add on layer 1, multiply on layer 2) | 12/17 (71%) |
+| h-three-looks | valid | 13 | cmp.window, img.level, img.noise, img.ramp, img.shape, img.switch, img.transform, sig.math, sig.speed, sig.timer | 6/6 | 69 s |  | 17/17 (100%) |
+| h-torus-dust | **invalid** | 5 | img.render, msh.scatter, msh.torus, pnt.colour, pnt.turbulence | 4/5 | 24 s | 5 nodes < 6; missing mat.point_sprite; no path mat.point_sprite > img.render; no pnt.colour.measure = "y" | 13/17 (76%) |
+| h-spark-fountain | valid | 5 | img.bloom, img.composite, img.constant, img.render_points, pnt.particles | 0/4 | 42 s |  | 13/13 (100%) |
+| h-orbit-cam | valid | 5 | img.render, mat.toon, mat.unlit, msh.sphere, msh.torus | 0/4 | 22 s |  | 19/19 (100%) |
+| h-breathing-clouds | **invalid** | 6 | img.hsv_adjust, img.level, img.noise, img.transform, sig.lfo | 1/5 | 20 s | missing sig.noise; img.transform scale bound from sig.lfo over 0.5..2 every 4 s not driven as asked; img.hsv_adjust hue bound from sig.noise not driven as asked | 7/10 (70%) |
+| h-cue-sheet | valid | 4 | dat.table, img.level, img.noise, img.transform | 0/4 | 11 s |  | 17/17 (100%) |
+| h-worn-tape | **invalid** | 11 | img.blend, img.blur, img.composite, img.constant, img.level, img.noise, img.ramp, sig.lfo | 7/11 | 61 s | missing img.feedback; no path img.feedback > img.composite/img.blend/img.mixer | 7/9 (78%) |
+| h-stark-poster | **invalid** | 5 | img.composite, img.level, img.mirror, img.noise, img.ramp | 0/4 | 21 s | missing img.threshold; missing img.lookup; no path img.noise > img.threshold > img.lookup; no path img.ramp > img.lookup; no img.threshold.softness <= 0.05; nothing is animated | 7/13 (54%) |
+| h-fix-broken-chain | valid | 7 | cmp.window, img.bloom, img.blur, img.noise, img.resolution, img.transform, sig.lfo | 0/2 | 59 s |  | 14/14 (100%) |
+| h-share-one-source | valid | 8 | cmp.window, img.blur, img.composite, img.hsv_adjust, img.level, img.noise | 0/2 | 65 s |  | 16/16 (100%) |
+| h-fix-trails | **invalid** | 6 | cmp.window, img.composite, img.feedback, img.level, img.noise, img.transform | 3/7 | 21 s | no path img.feedback > img.transform > img.composite > img.feedback; no path img.feedback > img.level > img.composite > img.feedback | 14/16 (88%) |
+| h-show-change-request | valid | 17 | cmp.window, img.blend, img.bloom, img.blur, img.composite, img.feedback, img.hsv_adjust, img.kaleidoscope, img.level, img.noise, img.shape, img.text, img.transform, sig.lfo, sig.noise | 0/4 | 42 s |  | 20/20 (100%) |
+| h-wire-the-signals | valid | 6 | cmp.window, img.hsv_adjust, img.level, img.noise, sig.lfo, sig.noise | 0/2 | 5 s |  | 12/12 (100%) |

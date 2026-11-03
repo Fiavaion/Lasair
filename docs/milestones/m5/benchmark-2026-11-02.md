@@ -85,6 +85,60 @@ Opus 5.5 was not run on the hard or expert sets: Sonnet
 already scores every check, so a harder tier is needed before Opus can show
 a difference.
 
+## DGX Spark (2026-11-02 to 2026-11-03)
+
+The same three sets on two DGX Sparks over Tailscale (vLLM, NVFP4
+weights, `--provider openai`, thinking off), three runs per cell. Qwen3.6
+35B (A3B) on one Spark, Qwen3.8 27B (dense) on the other, one eval at a
+time per Spark. The Sparks were shared with another machine's jobs, so
+times are under shared load and only comparable within this table.
+Reports: `eval-runs/spark-*.md`.
+
+| Model | Set | Assist | Valid per run | Checks per run | Median s/prompt |
+|---|---|---|---|---|---|
+| Qwen3.6 35B | easy | bare | 17 / 14 / 14 | 96 / 89 / 86% | 16 |
+| Qwen3.6 35B | easy | standard | 18 / 19 / 18 | 95 / 97 / 96% | 4 |
+| Qwen3.6 35B | easy | full | 19 / 19 / 18 | 97 / 97 / 95% | 13 |
+| Qwen3.6 35B | hard | bare | 3 / 4 / 4 | 70 / 70 / 69% | 48 |
+| Qwen3.6 35B | hard | standard | 4 / 4 / 5 | 73 / 72 / 74% | 12 |
+| Qwen3.6 35B | hard | full | 7 / 8 / 7 | 83 / 86 / 81% | 41 |
+| Qwen3.6 35B | expert | bare | 1 / 2 / 2 | 62 / 52 / 60% | 65 |
+| Qwen3.6 35B | expert | standard | 0 / 0 / 0 | 66 / 70 / 68% | 26 |
+| Qwen3.6 35B | expert | full | 1 / 1 / 1 | 84 / 75 / 79% | 56 |
+| Qwen3.8 27B | easy | standard | 19 / 20 / 19 | 97 / 100 / 97% | 18 |
+| Qwen3.8 27B | easy | full | 19 / 19 / 19 | 97 / 97 / 97% | 40 |
+| Qwen3.8 27B | hard | standard | 4 / 4 / 4 | 77 / 76 / 75% | 57 |
+| Qwen3.8 27B | hard | full | 6 / 6 / 6 | 83 / 83 / 82% | 99 |
+| Qwen3.8 27B | expert | standard | 2 / 2 / 1 | 72 / 68 / 70% | 106 |
+| Qwen3.8 27B | expert | full | 2 / 3 / 2 | 83 / 85 / 82% | 221 |
+
+Expert prompts passed: Qwen3.8 full `x-show-six-changes` ×3,
+`x-economy-mandala` ×2, `x-debug-tunnel` and `x-show-sections-edit` once;
+Qwen3.8 standard `x-show-sections-edit` ×3, `x-debug-tunnel` ×2. Qwen3.6
+full `x-show-six-changes` ×2, `x-debug-tunnel` once; Qwen3.6 bare the three
+debugging prompts, as on the Mac (`x-debug-tunnel` every run).
+
+- Both Spark models pass expert prompts that are not debugging a seeded
+  patch (mostly `x-show-six-changes`), which no model on the Mac did.
+  Qwen3.8 27B is the best non-cloud model on the expert set (1–3 of 12
+  valid, 82–85% of checks with full help), still far from Haiku (5–10 of
+  12), and about 4× slower per prompt than Qwen3.6 on the same hardware (median
+  12 vs 44 tokens/s per request).
+- Qwen3.6 35B on the Spark matches the Mac on the easy and hard sets, and
+  scores higher with full help on the expert set (1/12 valid every run,
+  75–84% of checks, against 0/12 and 66–72% on the Mac). The weights differ
+  (NVFP4 under vLLM against Ollama's quantisation), so this is not a
+  hardware result.
+- Ranking holds: full help beats standard on every hard and expert cell
+  for both models; bare stays worst on hard and expert.
+- No run was scored while a server was down: 21 runs were set aside and
+  re-run, all from one bug (fixed in 5bdf493: the OpenAI history sent
+  earlier tool-call arguments as objects, which vLLM rejects with 400).
+  Every request after the fix succeeded (Qwen3.6 3,994, Qwen3.8 732).
+
+GLM 5.3 Flash and DeepSeek V4 Flash (both Sparks together, 2026-11-03
+daytime windows) follow below when run.
+
 ## Findings
 
 - The easy set does not separate the cloud models, and the hard set barely

@@ -1,0 +1,23 @@
+# Network-generation eval
+
+**Model:** `openai:Qwen3.8-27B-NVFP4` · **Assist:** full · **Retrieval:** semantic · **Prompts:** `docs/milestones/m5/eval-prompts-hard.toml` · **Valid:** 6/15 (**40%**) · **Score:** 194/233 points (**83%** mean per prompt) · **Time:** 1960 s · **Max turns:** 40
+
+Valid = every check passes: at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something outside the channel nodes moves (an expression or a channel binding on it, or a SIG node wired into it). The hard tier adds wiring paths, parameter values, expressions and bindings, node counts, kept nodes and seed projects (see `agent_check.rs`). Every check is one point; Score = points earned / points possible. A model error makes the run invalid but adds no point to the maximum.
+
+| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why | Score |
+|---|---|---|---|---|---|---|---|
+| h-tunnel-two-screens | **invalid** | 7 | cmp.window, img.bloom, img.hsv_adjust, img.kaleidoscope, img.kernel, img.noise | 6/14 | 343 s | 7 nodes < 10; missing img.feedback; missing img.transform; missing img.composite; no path img.noise > img.kaleidoscope > img.composite > cmp.window; no path img.feedback > img.transform > img.composite > img.feedback; no path img.feedback > img.level/img.hsv_adjust > img.feedback; not met in any accepted way: the trails fade (a Level brightness or an HSV Adjust value below 1) | 15/23 (65%) |
+| h-layered-stage | **invalid** | 5 | cmp.window, img.mixer, img.noise, img.ramp, img.shape | 5/8 | 211 s | 5 nodes < 6; missing img.tile; no path img.shape > img.tile; no img.tile.repeat = [3,3]; not met in any accepted way: the three layers combined (two composites: add then multiply, or one mixer: add on layer 1, multiply on layer 2) | 12/17 (71%) |
+| h-three-looks | valid | 5 | cmp.window, img.noise, img.ramp, img.shape, img.switch | 4/7 | 120 s |  | 17/17 (100%) |
+| h-torus-dust | **invalid** | 5 | img.render_points, msh.torus, pnt.colour, pnt.scatter, pnt.turbulence | 9/7 | 136 s | 5 nodes < 6; missing msh.scatter; missing mat.point_sprite; missing img.render; no path msh.torus > msh.scatter > pnt.noise/pnt.turbulence > img.render; no path msh.scatter > pnt.colour > img.render; no path mat.point_sprite > img.render; no msh.scatter.count = 5000; no pnt.colour.measure = "y"; img.render azimuth moving with time not driven as asked | 7/17 (41%) |
+| h-spark-fountain | valid | 3 | img.bloom, img.render_points, pnt.particles | 0/4 | 75 s |  | 13/13 (100%) |
+| h-orbit-cam | valid | 5 | img.render, mat.toon, mat.unlit, msh.sphere, msh.torus | 0/4 | 48 s |  | 19/19 (100%) |
+| h-breathing-clouds | **invalid** | 7 | img.hsv_adjust, img.noise, img.transform, sig.lfo, sig.math | 2/5 | 264 s | missing sig.noise; img.hsv_adjust hue bound from sig.noise not driven as asked | 8/10 (80%) |
+| h-cue-sheet | **invalid** | 4 | dat.table, img.level, img.noise, img.transform | 0/4 | 92 s | img.level brightness from dat.table not driven as asked; img.transform rotate from dat.table not driven as asked | 15/17 (88%) |
+| h-worn-tape | **invalid** | 6 | img.blend, img.blur, img.level, img.noise, img.transform, sig.lfo | 3/5 | 99 s | missing img.feedback; no path img.feedback > img.composite/img.blend/img.mixer | 7/9 (78%) |
+| h-stark-poster | **invalid** | 5 | img.composite, img.level, img.mirror, img.noise, img.ramp | 0/4 | 133 s | missing img.threshold; missing img.lookup; no path img.noise > img.threshold > img.lookup; no path img.ramp > img.lookup; no img.threshold.softness <= 0.05 | 8/13 (62%) |
+| h-fix-broken-chain | **invalid** | 6 | cmp.window, img.bloom, img.blur, img.noise, img.resolution, sig.lfo | 0/4 | 244 s | 6 nodes < 7; no path img.noise > img.transform > cmp.window; img.transform rotate not driven as asked | 11/14 (79%) |
+| h-share-one-source | valid | 8 | cmp.window, img.blur, img.composite, img.hsv_adjust, img.level, img.noise | 0/2 | 29 s |  | 16/16 (100%) |
+| h-fix-trails | **invalid** | 6 | cmp.window, img.composite, img.feedback, img.level, img.noise, img.transform | 1/6 | 74 s | no path img.feedback > img.transform > img.composite > img.feedback; no path img.feedback > img.level > img.composite > img.feedback | 14/16 (88%) |
+| h-show-change-request | valid | 17 | cmp.window, img.blend, img.bloom, img.blur, img.composite, img.feedback, img.hsv_adjust, img.kaleidoscope, img.level, img.noise, img.shape, img.text, img.transform, sig.lfo, sig.noise | 0/2 | 62 s |  | 20/20 (100%) |
+| h-wire-the-signals | valid | 6 | cmp.window, img.hsv_adjust, img.level, img.noise, sig.lfo, sig.noise | 0/2 | 30 s |  | 12/12 (100%) |

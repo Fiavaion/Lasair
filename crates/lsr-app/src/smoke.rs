@@ -2,7 +2,9 @@
 //! [--screenshot out.png]` renders the shell for a number of frames, takes a
 //! screenshot, prints a one-line JSON report and exits. A failure to start,
 //! render or capture exits non-zero, so CI proves the shell runs on each OS
-//! (M0 AC2).
+//! (M0 AC2). It also prints `interactive_ms` when the second frame starts:
+//! the first frame is on screen and the event loop takes input (PT-11,
+//! timed from outside by `lasair bench`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -63,15 +65,18 @@ impl SmokeArgs {
 pub struct Smoke {
     args: SmokeArgs,
     frame: u32,
+    launched: Instant,
     started: Instant,
     shot: Arc<Mutex<Option<Arc<ColorImage>>>>,
 }
 
 impl Smoke {
-    pub fn new(args: SmokeArgs) -> Self {
+    /// `launched` is the first instant of `main`.
+    pub fn new(args: SmokeArgs, launched: Instant) -> Self {
         Self {
             args,
             frame: 0,
+            launched,
             started: Instant::now(),
             shot: Arc::default(),
         }
@@ -81,6 +86,16 @@ impl Smoke {
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.frame += 1;
         ctx.request_repaint();
+        if self.frame == 2 {
+            use std::io::Write as _;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "interactive_ms": self.launched.elapsed().as_millis() as u64,
+                })
+            );
+            let _ = std::io::stdout().flush();
+        }
 
         if self.frame == self.args.frames {
             let slot = Arc::clone(&self.shot);

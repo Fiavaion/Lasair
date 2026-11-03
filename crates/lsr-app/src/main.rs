@@ -35,6 +35,7 @@ mod wires;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    let launched = std::time::Instant::now();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     // An optional project folder first, then smoke-mode flags.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -113,6 +114,7 @@ fn main() -> ExitCode {
         kiosk,
         heartbeat,
         allow_python,
+        launched,
     };
     let result = eframe::run_native(
         "Lasair",

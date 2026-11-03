@@ -1016,6 +1016,91 @@ fn pt8(gpu: &GpuContext) -> Case {
     }
 }
 
+/// PT-11: cold start to interactive ≤ 5 s (AI Host warm-up excluded).
+/// Launches the `lasair-app` built next to this binary in smoke mode and
+/// times spawn → its `interactive_ms` line (first frame on screen, event
+/// loop taking input), over 5 launches. `ms` is the slowest. The first
+/// launch after a build or reboot is the coldest the disk cache allows
+/// here; a true cold start is the hand check after a reboot.
+fn pt11() -> Case {
+    const ID: &str = "pt11.cold_start";
+    const BUDGET_MS: f64 = 5000.0;
+    const LAUNCHES: usize = 5;
+    let app = std::env::current_exe().ok().and_then(|exe| {
+        let app = exe
+            .parent()?
+            .join(format!("lasair-app{}", std::env::consts::EXE_SUFFIX));
+        app.exists().then_some(app)
+    });
+    let Some(app) = app else {
+        return Case {
+            id: ID,
+            status: Status::Skipped,
+            ms: None,
+            note: Some("no lasair-app next to this binary (cargo build -p lsr-app)".into()),
+        };
+    };
+    let mut times = Vec::with_capacity(LAUNCHES);
+    for _ in 0..LAUNCHES {
+        match launch_to_interactive(&app) {
+            Ok(ms) => times.push(ms),
+            Err(err) => {
+                return Case {
+                    id: ID,
+                    status: Status::Error,
+                    ms: None,
+                    note: Some(format!("{err:#}")),
+                };
+            }
+        }
+    }
+    let slowest = times.iter().copied().fold(0.0, f64::max);
+    Case {
+        id: ID,
+        status: if slowest <= BUDGET_MS {
+            Status::Ok
+        } else {
+            Status::Error
+        },
+        ms: Some(slowest),
+        note: Some(format!(
+            "{LAUNCHES} launches, spawn to first interactive frame (ms): {}; budget {BUDGET_MS} ms",
+            times
+                .iter()
+                .map(|t| format!("{t:.0}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// One smoke launch; milliseconds from spawn to the `interactive_ms` line.
+fn launch_to_interactive(app: &Path) -> anyhow::Result<f64> {
+    use std::io::BufRead as _;
+    let start = Instant::now();
+    let mut child = std::process::Command::new(app)
+        .args(["--smoke", "2"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("starting {}", app.display()))?;
+    let stdout = child.stdout.take().context("no stdout")?;
+    let mut seen = None;
+    // Read to the end: closing the pipe early would fail the app's later
+    // prints.
+    for line in std::io::BufReader::new(stdout).lines() {
+        if seen.is_none() && line?.contains("\"interactive_ms\"") {
+            seen = Some(start.elapsed().as_secs_f64() * 1e3);
+        }
+    }
+    let status = child.wait()?;
+    match seen {
+        Some(ms) if status.success() => Ok(ms),
+        Some(_) => anyhow::bail!("lasair-app --smoke 2 exited with {status}"),
+        None => anyhow::bail!("lasair-app exited ({status}) before its first frame"),
+    }
+}
+
 pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
     let mut platform = PlatformInfo::host();
     let mut adapter = None;
@@ -1104,6 +1189,9 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                     note: Some(format!("{err:#}")),
                 }));
                 cases.push(pt8(&gpu));
+                // The app opens its own device; this one is dropped first.
+                drop(gpu);
+                cases.push(pt11());
             }
             Err(err) => cases.push(Case {
                 id: "startup.gpu_device",

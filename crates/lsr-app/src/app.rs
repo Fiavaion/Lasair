@@ -52,7 +52,7 @@ pub enum Tab {
 }
 
 /// How the shell was launched (`lasair run`, `docs/run.md`).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Shell {
     /// Show mode: only the viewer, full screen, no cursor.
     pub kiosk: bool,
@@ -61,6 +61,8 @@ pub struct Shell {
     /// `--allow-python-ops` (`lasair run --allow-python-ops`): the opened
     /// project's Python runs without asking, for unattended shows.
     pub allow_python: bool,
+    /// The first instant of `main`, for smoke mode's start-up time.
+    pub launched: Instant,
 }
 
 pub struct LasairApp {
@@ -237,6 +239,7 @@ impl LasairApp {
             dock.open(Area::Left, Tab::Assistant);
             ai_hosts.show_storage();
         }
+        let launched = shell.launched;
         Self {
             shell,
             dock,
@@ -267,7 +270,7 @@ impl LasairApp {
                 merge: Default::default(),
                 assistant: Default::default(),
             },
-            smoke: smoke.map(Smoke::new),
+            smoke: smoke.map(|args| Smoke::new(args, launched)),
             start: Instant::now(),
             project,
             title: String::new(),

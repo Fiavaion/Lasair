@@ -105,16 +105,19 @@ Reports: `eval-runs/spark-*.md`.
 | Qwen3.6 35B | expert | bare | 1 / 2 / 2 | 62 / 52 / 60% | 65 |
 | Qwen3.6 35B | expert | standard | 0 / 0 / 0 | 66 / 70 / 68% | 26 |
 | Qwen3.6 35B | expert | full | 1 / 1 / 1 | 84 / 75 / 79% | 56 |
+| Qwen3.8 27B | easy | bare | 17 / 18 / 18 | 94 / 96 / 96% | 54 |
 | Qwen3.8 27B | easy | standard | 19 / 20 / 19 | 97 / 100 / 97% | 18 |
 | Qwen3.8 27B | easy | full | 19 / 19 / 19 | 97 / 97 / 97% | 40 |
+| Qwen3.8 27B | hard | bare | 5 / 7 / 6 | 72 / 74 / 64% | 131 |
 | Qwen3.8 27B | hard | standard | 4 / 4 / 4 | 77 / 76 / 75% | 57 |
 | Qwen3.8 27B | hard | full | 6 / 6 / 6 | 83 / 83 / 82% | 99 |
+| Qwen3.8 27B | expert | bare | 0 / 0 / 1 | 45 / 40 / 49% | 194 |
 | Qwen3.8 27B | expert | standard | 2 / 2 / 1 | 72 / 68 / 70% | 106 |
 | Qwen3.8 27B | expert | full | 2 / 3 / 2 | 83 / 85 / 82% | 221 |
 
 Expert prompts passed: Qwen3.8 full `x-show-six-changes` ×3,
 `x-economy-mandala` ×2, `x-debug-tunnel` and `x-show-sections-edit` once;
-Qwen3.8 standard `x-show-sections-edit` ×3, `x-debug-tunnel` ×2. Qwen3.6
+Qwen3.8 standard `x-show-sections-edit` ×3, `x-debug-tunnel` ×2; Qwen3.8 bare `x-debug-tunnel` once. Qwen3.6
 full `x-show-six-changes` ×2, `x-debug-tunnel` once; Qwen3.6 bare the three
 debugging prompts, as on the Mac (`x-debug-tunnel` every run).
 
@@ -129,15 +132,19 @@ debugging prompts, as on the Mac (`x-debug-tunnel` every run).
   75–84% of checks, against 0/12 and 66–72% on the Mac). The weights differ
   (NVFP4 under vLLM against Ollama's quantisation), so this is not a
   hardware result.
-- Ranking holds: full help beats standard on every hard and expert cell
-  for both models; bare stays worst on hard and expert.
+- Ranking holds on checks: full help beats standard on every hard and
+  expert cell for both models, and bare is worst. On the hard set Qwen3.8
+  bare gets more prompts fully right than standard (5–7 against 4 of 15)
+  while scoring fewer checks (64–74% against 75–77%); its bare runs are
+  also the slowest (median 131 s a prompt).
 - No run was scored while a server was down: 21 runs were set aside and
   re-run, all from one bug (fixed in 5bdf493: the OpenAI history sent
   earlier tool-call arguments as objects, which vLLM rejects with 400).
   Every request after the fix succeeded (Qwen3.6 3,994, Qwen3.8 732).
 
-GLM 5.3 Flash and DeepSeek V4 Flash (both Sparks together, 2026-11-03
-daytime windows) follow below when run.
+GLM 5.3 Flash and DeepSeek V4 Flash were planned for the 2026-11-03
+daytime windows; the Sparks stayed on the Qwen models, so they are not run
+yet.
 
 ## Findings
 

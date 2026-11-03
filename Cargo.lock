@@ -2313,6 +2313,7 @@ dependencies = [
  "snap",
  "thiserror 2.0.21",
  "toml_edit",
+ "windows-sys 0.61.2",
  "zune-jpeg 0.4.21",
 ]
 

@@ -26,6 +26,10 @@ log.workspace = true
 # DMX fixture and patch files (TOML).
 toml_edit.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# timeBeginPeriod for the MIDI clock thread.
+windows-sys = { workspace = true, features = ["Win32_Media"] }
+
 [build-dependencies]
 cc = "1"
 pkg-config = "0.3"

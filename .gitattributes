@@ -26,3 +26,5 @@
 # The app icon: tests compare the SVG with its generator byte for byte.
 *.svg text eol=lf
 *.ico binary
+# The assistant's golden prompts are compared byte for byte.
+crates/lsr-agent/tests/golden/*.txt text eol=lf

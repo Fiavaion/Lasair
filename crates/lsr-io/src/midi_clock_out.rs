@@ -45,6 +45,33 @@ const MIN_SPIN: Duration = Duration::from_micros(300);
 const MAX_SPIN: Duration = Duration::from_millis(3);
 const MAX_SLEEP: Duration = Duration::from_millis(1);
 
+/// Windows wakes a sleeping thread on its timer tick, 15.6 ms by default,
+/// which the spin cannot cover: a pulse would land up to a tick late. The
+/// clock thread asks for 1 ms ticks while it lives (the setting is per
+/// process on Windows 10 2004 and later, and undone when the guard drops).
+struct FineTimer;
+
+impl FineTimer {
+    fn new() -> Self {
+        #[cfg(windows)]
+        // SAFETY: plain winmm call, matched by `timeEndPeriod` in `drop`.
+        unsafe {
+            windows_sys::Win32::Media::timeBeginPeriod(1);
+        }
+        Self
+    }
+}
+
+impl Drop for FineTimer {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        // SAFETY: undoes the `timeBeginPeriod(1)` in `new`.
+        unsafe {
+            windows_sys::Win32::Media::timeEndPeriod(1);
+        }
+    }
+}
+
 impl ClockOut {
     /// Starts the timing thread, sending on `out`. Idle until
     /// [`Self::begin`].
@@ -103,6 +130,7 @@ impl Drop for ClockOut {
 }
 
 fn run(shared: &(Mutex<OutState>, Condvar), out: &OutHandle) {
+    let _timer = FineTimer::new();
     let (lock, cv) = shared;
     let mut running = false;
     // When the next pulse is due.

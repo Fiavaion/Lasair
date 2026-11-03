@@ -287,7 +287,8 @@ impl OpenAiCompat {
             "max_tokens": 2048,
             "stream": false,
             // Thinking models otherwise spend the reply budget thinking.
-            "chat_template_kwargs": {"enable_thinking": false},
+            // Qwen and GLM templates read `enable_thinking`, DeepSeek `thinking`.
+            "chat_template_kwargs": {"enable_thinking": false, "thinking": false},
         });
         if !tools.is_empty() {
             body["tools"] = json!(tools);
@@ -303,7 +304,7 @@ impl OpenAiCompat {
             "max_tokens": 4096,
             "stream": false,
             "response_format": {"type": "json_object"},
-            "chat_template_kwargs": {"enable_thinking": false},
+            "chat_template_kwargs": {"enable_thinking": false, "thinking": false},
         })
     }
 
@@ -1436,11 +1437,13 @@ mod tests {
         assert_eq!(b["model"], "m");
         assert_eq!(b["tools"][0], tool);
         assert_eq!(b["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(b["chat_template_kwargs"]["thinking"], false);
         assert_eq!(b["max_tokens"], 2048);
         assert!(b.get("response_format").is_none());
         let j = o.json_body(&msgs);
         assert_eq!(j["response_format"]["type"], "json_object");
         assert_eq!(j["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(j["chat_template_kwargs"]["thinking"], false);
         assert_eq!(j["max_tokens"], 4096);
         o.key = None;
         assert_eq!(o.bearer(), None);

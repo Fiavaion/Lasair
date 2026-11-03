@@ -806,8 +806,9 @@ mod tests {
         let csv = out.join("soak.csv");
         let s = soak(&mut ws, "stage-deck", &opts, &csv).unwrap();
         // The machinery, not the speed: a software adapter (WARP on CI)
-        // manages a frame or two a second on this deck.
-        assert!(s.frames >= 3, "{} frames in 3 s", s.frames);
+        // manages a frame or two a second on this deck (2 frames in 3 s on
+        // the Windows runner, run of dc38ee4): one in warm-up, one measured.
+        assert!(s.frames >= 2, "{} frames in 3 s", s.frames);
         assert!(s.frames_measured > 0 && s.frames_measured < s.frames);
         assert!(s.launches >= 1, "{} launches", s.launches);
         assert!(s.rss_baseline_mb > 1.0 && s.rss_end_mb > 1.0);

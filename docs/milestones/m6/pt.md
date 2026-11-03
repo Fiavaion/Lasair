@@ -17,7 +17,7 @@ and the verdict waits for the hand check on that machine.
 | PT-9 | AI Host crash → frames again ≤ 5 s, output never below project fps (all) | `lsr-ops-ai` `tests/pt9.rs`: results again 135 ms after the host was killed, slowest cook 1.0 ms | **met** (engine side, test host) |
 | PT-10 | 24 h soak: no leak > 100 MB, no spike > 50 ms (RTX 4070, lab image) | the 24 h run here failed on spikes while Ollama loaded the GPU; memory held | clean re-run, then the lab-image run |
 | PT-11 | cold start to interactive ≤ 5 s (all) | not in the suite: no headless hook reaches a first frame without a project, and the app's start needs app changes | open |
-| PT-12 | Boolean of two 100k-triangle meshes ≤ 150 ms; PolyReduce 1M → 100k ≤ 500 ms (RTX 4070 PC, CPU) | Boolean: **167 s** at 100k each (one run; 50 ms at 1.5k, 0.68 s at 6k, ~10 s at 25k). PolyReduce: p50 1483 ms | **Boolean not met by ~1000×**; PolyReduce ~3× over here |
+| PT-12 | Boolean of two 100k-triangle meshes ≤ 150 ms; PolyReduce 1M → 100k ≤ 500 ms (RTX 4070 PC, CPU) | Boolean: **167 s** at 100k each (one run; 50 ms at 1.5k, 0.68 s at 6k, ~10 s at 25k). PolyReduce: p50 1483 ms | superseded: see the updates below (both met here) |
 
 ## What this means for AC1
 
@@ -34,5 +34,14 @@ and the verdict waits for the hand check on that machine.
   a decision for Mark. PolyReduce at 1.5 s here is also unlikely to reach
   500 ms on the 4070 PC's CPU without work.
 
-The Boolean case runs two smaller sizes by default (the full size takes
-about 3 minutes); `LASAIR_BENCH_BOOLEAN_FULL=1` runs the 100k size.
+**Update 2026-11-03 (PRD A74):** `msh.boolean` now cooks on
+manifold-rust. `pt12.boolean_100k` runs the 100k size by default (5 runs):
+p50 114 ms, max 136 ms on this Mac, against 167 s before. The
+`LASAIR_BENCH_BOOLEAN_FULL` opt-in is gone. Verdict: RTX 4070 PC hand check
+(met here).
+
+**Update 2026-11-03 (PolyReduce):** `pt12.polyreduce_1m` p50 1483 ms →
+235 ms (4-ary heap with in-place keys, flat adjacency, Z-ordered chunks on
+up to 8 threads, then one exact pass; output identical for any thread
+count, quality equal to the exact greedy). Verdict: RTX 4070 PC hand check
+(met here). PT-12 is now met on this Mac for both cases.

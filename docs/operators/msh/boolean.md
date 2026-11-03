@@ -2,7 +2,7 @@
 
 MSH · version 1 · cook budget 100 µs
 
-Union, intersection or difference of two closed meshes (BSP trees). The result is welded; pieces from A and B are the groups `from_a` and `from_b`. Up to 200,000 triangles per input; seams may keep T-junctions; normals are not written (add Normals).
+Union, intersection or difference of two closed meshes (the Manifold algorithm, exact predicates). The result is a closed triangle mesh welded by index; float point attributes are interpolated; pieces from A and B are the groups `from_a` and `from_b`. Closed but non-manifold inputs (edges shared by more than two faces) take a slower robust engine; a manifold input that intersects itself is taken as is; open inputs are an error. Normals are not written (add Normals). Cooks on a worker: about 120 ms for 100k triangles a side.
 
 ## Inputs
 

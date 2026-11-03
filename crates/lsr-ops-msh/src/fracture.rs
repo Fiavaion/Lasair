@@ -1,7 +1,7 @@
 //! Fracture: breaks a closed mesh into Voronoi pieces. Each seed point's
 //! cell (the space nearer to it than to any other seed) is built as a
 //! convex polyhedron by cutting a box with the bisector planes of the
-//! other seeds, then intersected with the input by the BSP Boolean. Heavy:
+//! other seeds, then intersected with the input by the Boolean. Heavy:
 //! it cooks on a worker like every MSH operator, and is usually baked.
 
 use lsr_core::geo::{AttrClass, names};

@@ -4,7 +4,6 @@
 //! Live, nothing waits (rule 1); offline (`CookMode::Offline`), the cook
 //! waits so frame `i` uses the inputs of frame `i`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -14,6 +13,7 @@ use lsr_core::registry::{OperatorSchema, ParamKind};
 use lsr_gpu::engine::{CookMode, GeoCtx, GeoOp, Params};
 use lsr_gpu::geo::readback::{Mapped, Readback};
 use lsr_gpu::geo::{Attribute, BufferPool, Geometry};
+use manifold_rust::cancel::CancelToken;
 use serde_json::Value;
 
 use crate::mesh::Mesh;
@@ -26,10 +26,11 @@ pub type RunFn = fn(&Snap, &[Option<Mesh>], &Job) -> Result<Mesh, String>;
 pub const CANCELLED: &str = "cancelled";
 
 /// A running job's handle: operators call [`Job::check`] in long loops so
-/// a superseded cook stops early.
+/// a superseded cook stops early. The flag is Manifold's cancel token, so
+/// the Boolean's library code stops on the same signal.
 #[derive(Debug, Clone, Default)]
 pub struct Job {
-    cancel: Arc<AtomicBool>,
+    cancel: CancelToken,
 }
 
 impl Job {
@@ -40,7 +41,7 @@ impl Job {
 
     /// `Err` once the job is cancelled.
     pub fn check(&self) -> Result<(), String> {
-        if self.cancel.load(Ordering::Relaxed) {
+        if self.cancel.is_cancelled() {
             Err(CANCELLED.into())
         } else {
             Ok(())
@@ -50,6 +51,11 @@ impl Job {
     /// [`Self::check`] every 4096th `i`.
     pub fn every(&self, i: usize) -> Result<(), String> {
         if i & 4095 == 0 { self.check() } else { Ok(()) }
+    }
+
+    /// The token library code polls (the Boolean's Manifold calls).
+    pub fn token(&self) -> &CancelToken {
+        &self.cancel
     }
 }
 
@@ -286,7 +292,7 @@ struct Done {
 #[derive(Debug)]
 struct Running {
     generation: u64,
-    cancel: Arc<AtomicBool>,
+    cancel: CancelToken,
 }
 
 /// The engine-facing GEO operator for every MSH operator.
@@ -382,7 +388,7 @@ impl MeshNode {
         };
         let recent = self.last_delivery.is_some_and(|t| t.elapsed() < STARVE);
         if recent {
-            running.cancel.store(true, Ordering::Relaxed);
+            running.cancel.cancel();
         }
         self.waiting = Some(spec);
     }
@@ -480,7 +486,7 @@ impl MeshNode {
 impl Drop for MeshNode {
     fn drop(&mut self) {
         if let Some(r) = &self.running {
-            r.cancel.store(true, Ordering::Relaxed);
+            r.cancel.cancel();
         }
     }
 }

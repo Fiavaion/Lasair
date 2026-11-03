@@ -49,63 +49,29 @@ fn p50(ms: &[f64]) -> f64 {
     ms[ms.len() / 2]
 }
 
-/// One Boolean (subtract) of two offset spheres of `rows × columns`: the
-/// triangles per input, the cook time and the result's polygon count.
-fn boolean_once(rows: u32, columns: u32) -> anyhow::Result<(u64, f64, usize)> {
-    let a = sphere(rows, columns, [0.0; 3])?;
-    let b = sphere(rows, columns, [0.35, 0.1, 0.0])?;
-    let t = Instant::now();
-    let out = lsr_ops_msh::run(
+/// PT-12, first half: Boolean (subtract) of two offset spheres of about
+/// 100k triangles each, with the Manifold Boolean that ships (PRD A74). The
+/// target (≤ 150 ms) is judged on the RTX 4070 PC's CPU.
+pub fn boolean_100k() -> anyhow::Result<Case> {
+    let (rows, cols) = (158, 320);
+    let a = sphere(rows, cols, [0.0; 3])?;
+    let b = sphere(rows, cols, [0.35, 0.1, 0.0])?;
+    let tris = sphere_tris(rows, cols);
+    let (ms, out) = cook(
         "msh.boolean",
         &[("operation", json!("subtract"))],
         &[Some(a), Some(b)],
-    )
-    .map_err(|e| anyhow::anyhow!("msh.boolean: {e}"))?;
-    Ok((
-        sphere_tris(rows, columns),
-        t.elapsed().as_secs_f64() * 1e3,
-        out.prims(),
-    ))
-}
-
-/// Set to run the Boolean at the full PT-12 size (about 100k triangles per
-/// input), which takes minutes with the shipped BSP Boolean.
-const FULL_ENV: &str = "LASAIR_BENCH_BOOLEAN_FULL";
-
-/// PT-12, first half: Boolean (subtract) of two offset spheres. The target
-/// (100k triangles per input in ≤ 150 ms) is judged on the RTX 4070 PC's
-/// CPU against the BSP Boolean that ships (PRD A48). The BSP Boolean's work
-/// grows far faster than linearly, so the default run measures two smaller
-/// sizes in a second or so and reports the target as not measured; with
-/// `LASAIR_BENCH_BOOLEAN_FULL=1` it runs the real size once.
-pub fn boolean_100k() -> anyhow::Result<Case> {
-    let cap = lsr_ops_msh::boolean::MAX_POLYGONS as u64;
-    if std::env::var_os(FULL_ENV).is_some() {
-        let (tris, ms, prims) = boolean_once(158, 320)?;
-        anyhow::ensure!(tris <= cap, "{tris} triangles is over the cap of {cap}");
-        return Ok(Case {
-            id: "pt12.boolean_100k",
-            status: Status::Ok,
-            ms: Some(ms),
-            note: Some(format!(
-                "subtract of two offset spheres, {tris} triangles each (cap {cap}), CPU cook, 1 run: {ms:.0} ms, result {prims} polygons; target ≤ 150 ms on the RTX 4070 PC's CPU, against the shipped BSP Boolean (PRD A48)"
-            )),
-        });
-    }
-    let mut steps = Vec::new();
-    for (rows, columns) in [(20, 40), (40, 80)] {
-        let (tris, ms, prims) = boolean_once(rows, columns)?;
-        steps.push(format!(
-            "{tris} triangles each: {ms:.0} ms ({prims} polygons out)"
-        ));
-    }
+        5,
+    )?;
+    let (p50, max) = (p50(&ms), ms[ms.len() - 1]);
     Ok(Case {
         id: "pt12.boolean_100k",
-        status: Status::Skipped,
-        ms: None,
+        status: Status::Ok,
+        ms: Some(p50),
         note: Some(format!(
-            "100k triangles per input not run by default (BSP Boolean work grows far faster than linearly; cap {cap} allows it): subtract of two offset spheres, CPU cook, 1 run each: {}; set {FULL_ENV}=1 for the full size. Target ≤ 150 ms on the RTX 4070 PC's CPU, against the shipped BSP Boolean (PRD A48)",
-            steps.join("; ")
+            "subtract of two offset spheres, {tris} triangles each, CPU cook, {} runs: p50 {p50:.1} ms, max {max:.1} ms, result {} triangles; target ≤ 150 ms on the RTX 4070 PC's CPU",
+            ms.len(),
+            out.prims()
         )),
     })
 }

@@ -245,6 +245,103 @@ fn boolean_volumes_of_two_boxes() {
 }
 
 #[test]
+fn boolean_is_exact_closed_and_carries_attributes() {
+    let a = make("msh.box", &[]);
+    let b = make("msh.box", &[("centre", json!([0.5, 0.5, 0.5]))]);
+    for (op, v) in [
+        ("union", 2.0 - 0.125),
+        ("intersect", 0.125),
+        ("subtract", 1.0 - 0.125),
+    ] {
+        let m = run(
+            "msh.boolean",
+            &[("operation", json!(op))],
+            &[Some(a.clone()), Some(b.clone())],
+        );
+        assert!((volume(&m) - v).abs() < 1e-9, "{op}: {}", volume(&m));
+        assert!(watertight(&m), "{op}: closed and welded by index");
+        assert!(m.closed.iter().all(|&c| c), "{op}: polygons only");
+    }
+    // Sphere minus box: closed by index, and `uv` interpolated onto the cut.
+    let ball = on(
+        "msh.uv_project",
+        &[("projection", json!("spherical"))],
+        &make("msh.sphere", &[("type", json!("ico")), ("level", json!(3))]),
+    );
+    let cut = run(
+        "msh.boolean",
+        &[("operation", json!("subtract"))],
+        &[Some(ball.clone()), Some(b.clone())],
+    );
+    assert!(watertight(&cut));
+    assert!(close(volume(&cut), volume(&ball) * 7.0 / 8.0, 0.02));
+    let uv = cut.point_attr("uv").expect("uv carried");
+    assert_eq!(uv.len(), cut.points());
+    let uv = uv.floats().unwrap();
+    assert!(uv.iter().all(|&x| (-1e-4..=1.0 + 1e-4).contains(&x)));
+}
+
+#[test]
+fn boolean_is_deterministic_across_runs_and_threads() {
+    let s = make("msh.sphere", &[("type", json!("ico")), ("level", json!(4))]);
+    let b = make("msh.box", &[("centre", json!([0.3, 0.3, 0.3]))]);
+    let go = move || {
+        lsr_ops_msh::run(
+            "msh.boolean",
+            &[("operation", json!("subtract"))],
+            &[Some(s.clone()), Some(b.clone())],
+        )
+        .unwrap()
+    };
+    let first = go();
+    let bits = |m: &Mesh| -> Vec<u32> { m.p.iter().flatten().map(|x| x.to_bits()).collect() };
+    // Concurrent cooks reserve Manifold IDs in between; the output must not
+    // depend on them.
+    let others: Vec<Mesh> = (0..3)
+        .map(|_| std::thread::spawn(go.clone()))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|h| h.join().unwrap())
+        .chain([go()])
+        .collect();
+    for m in &others {
+        assert_eq!(m, &first, "same mesh");
+        assert_eq!(bits(m), bits(&first), "same position bits");
+    }
+}
+
+#[test]
+fn boolean_takes_non_manifold_input_and_rejects_open_input() {
+    // Two boxes sharing one edge, welded: closed, but four faces meet on
+    // that edge, so only the robust engine reads it.
+    let a = make("msh.box", &[]);
+    let c = make("msh.box", &[("centre", json!([1.0, 1.0, 0.0]))]);
+    let pair = on("msh.fuse", &[], &run("msh.merge", &[], &[Some(a), Some(c)]));
+    let bridge = make("msh.box", &[("centre", json!([0.5, 0.5, 0.0]))]);
+    let u = run(
+        "msh.boolean",
+        &[("operation", json!("union"))],
+        &[Some(pair.clone()), Some(bridge.clone())],
+    );
+    assert!((volume(&u) - 2.5).abs() < 1e-6, "{}", volume(&u));
+    let d = run(
+        "msh.boolean",
+        &[("operation", json!("subtract"))],
+        &[Some(pair), Some(bridge.clone())],
+    );
+    assert!((volume(&d) - 1.5).abs() < 1e-6, "{}", volume(&d));
+    // An open grid has no inside: a node error, not a panic.
+    let grid = make("msh.grid", &[]);
+    let err = lsr_ops_msh::run(
+        "msh.boolean",
+        &[("operation", json!("subtract"))],
+        &[Some(grid), Some(bridge)],
+    )
+    .unwrap_err();
+    assert!(err.contains("input A is not a closed surface"), "{err}");
+}
+
+#[test]
 fn sweep_a_circle_along_a_line_and_an_arc() {
     let line = make(
         "msh.line",

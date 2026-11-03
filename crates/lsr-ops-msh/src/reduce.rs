@@ -591,7 +591,7 @@ const CHUNKED: usize = 2 * CHUNK;
 const CHUNK: usize = 1 << 16;
 /// How far above the share the chunks stop, leaving the last collapses to
 /// the pass over the whole mesh (where the seams between chunks can go).
-const CHUNK_SLACK: f64 = 1.5;
+const CHUNK_SLACK: f64 = 2.0;
 
 /// The triangles in Z-order of their centres on a 32³ grid over the
 /// points' bounds (a counting sort, so equal cells keep index order).

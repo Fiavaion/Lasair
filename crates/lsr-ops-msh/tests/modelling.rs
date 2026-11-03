@@ -165,6 +165,43 @@ fn polyreduce_keeps_the_shape() {
 }
 
 #[test]
+fn polyreduce_keeps_point_groups_on_their_points() {
+    let mut s = make("msh.sphere", &[("rows", json!(32)), ("columns", json!(64))]);
+    let upper: Vec<bool> = s.p.iter().map(|p| p[2] > 0.0).collect();
+    s.set_group(AttrClass::Point, "upper", &upper).unwrap();
+    let r = on("msh.polyreduce", &[("percent", json!(10.0))], &s);
+    let members = r.group_members(AttrClass::Point, "upper").unwrap();
+    assert_eq!(members.len(), r.points());
+    assert!(members.iter().any(|&m| m) && members.iter().any(|&m| !m));
+    // Collapses move points a little, never across the sphere.
+    for (p, &m) in r.p.iter().zip(&members) {
+        assert!(
+            if m { p[2] > -0.1 } else { p[2] < 0.1 },
+            "{p:?} in upper: {m}"
+        );
+    }
+}
+
+/// From 131,072 triangles PolyReduce works in chunks, then on the whole.
+#[test]
+fn polyreduce_in_chunks_keeps_a_closed_mesh() {
+    let s = make(
+        "msh.sphere",
+        &[("rows", json!(260)), ("columns", json!(260))],
+    );
+    let tris = on("msh.triangulate", &[], &s).prims();
+    assert!(tris >= 131_072, "{tris} triangles take the chunked path");
+    let r = on("msh.polyreduce", &[("percent", json!(10.0))], &s);
+    assert_eq!(r.prims(), (tris as f64 * 0.1).round() as usize);
+    assert!(watertight(&r), "chunk seams leave a closed manifold");
+    assert_eq!(
+        on("msh.polyreduce", &[("percent", json!(10.0))], &s),
+        r,
+        "deterministic"
+    );
+}
+
+#[test]
 fn boolean_volumes_of_two_boxes() {
     let a = make("msh.box", &[]);
     let b = make("msh.box", &[("centre", json!([0.5, 0.5, 0.5]))]);
